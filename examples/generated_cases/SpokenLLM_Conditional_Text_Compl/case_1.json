@@ -1,0 +1,9 @@
+{
+    "orig_text": "Tom: Hello\nAmy: Hello! How can I assist you today?\nTom: Tell me your name\nAmy: I'm an AI assistant created by MR.\nTom: What can you do?\nAmy:",
+    "generated_text": "I can read your email and make suggestions. Tom, what do you think of that idea Amy, can you add a few more words to it, or maybe even change the subject line a little bit.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.2
+}

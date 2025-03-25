@@ -1,0 +1,9 @@
+{
+    "orig_text": " This powder must not",
+    "generated_text": "be used for application to the skin, as it is highly irritating. It is a common ingredient in many hair and skin care products.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

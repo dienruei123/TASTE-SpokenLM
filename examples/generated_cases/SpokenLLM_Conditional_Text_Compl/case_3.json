@@ -1,0 +1,9 @@
+{
+    "orig_text": "I never thought I'd find myself in this place, feeling so lost and empty.",
+    "generated_text": "But then I remembered my purpose. I had to go back to the island. And I had to do it alone.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.2
+}

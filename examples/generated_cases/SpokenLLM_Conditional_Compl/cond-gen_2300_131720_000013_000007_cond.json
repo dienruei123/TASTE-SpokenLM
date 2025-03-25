@@ -1,0 +1,9 @@
+{
+    "orig_text": " The street conductors were amazed",
+    "generated_text": "to see that, at the end of the week, they had received more than the usual amount of money.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

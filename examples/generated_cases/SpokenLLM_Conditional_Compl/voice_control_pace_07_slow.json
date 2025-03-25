@@ -1,0 +1,9 @@
+{
+    "orig_text": "[Q] Repeat the following sentence at a fast pace: Hey, how's everything going with you lately? Hope you're doing well and staying healthy. \n[A] Hey, how's everything going with you lately? Hope you're doing well and staying healthy. \n[Q] Please read the following sentence at a slow pace: Wishing you a wonderful weekend ahead. \n[A] Wishing you a wonderful weekend ahead. \n[Q] Please read the following sentence at a slow pace: It feels like forever since we last caught up. How have you been these days? \n[A] ",
+    "generated_text": "It feels like forever since we last caught up. How have you been these days. What is your name, please.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

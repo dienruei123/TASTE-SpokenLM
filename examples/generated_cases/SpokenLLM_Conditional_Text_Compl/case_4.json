@@ -1,0 +1,9 @@
+{
+    "orig_text": "I am so happy. This is my best day in my life",
+    "generated_text": ". I feel so much better and so much happier. I have never felt this way before.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.2
+}

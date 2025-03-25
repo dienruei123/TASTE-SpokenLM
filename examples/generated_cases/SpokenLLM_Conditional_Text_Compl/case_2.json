@@ -1,0 +1,9 @@
+{
+    "orig_text": "Hurry up. Hurry up. Hurry up.",
+    "generated_text": "I'm gonna go to the corner and get some candy. Oh, you're going to the corner to get some candy.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.2
+}

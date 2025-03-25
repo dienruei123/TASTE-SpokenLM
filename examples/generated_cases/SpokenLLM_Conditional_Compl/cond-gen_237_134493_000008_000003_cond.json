@@ -1,0 +1,9 @@
+{
+    "orig_text": " Alexandra lets you sleep late.",
+    "generated_text": "But if you want to get up early, you can do it. Alexandra has a great view of the garden and the mountains.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

@@ -1,0 +1,9 @@
+{
+    "orig_text": " I love the movie Bend It Like Beckham.",
+    "generated_text": "I love the story of a girl who, after being told she can't play soccer, plays it anyway.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

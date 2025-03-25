@@ -1,0 +1,9 @@
+{
+    "orig_text": " I am from Toronto, Ontario, Canada. I was raised there up until I decided to move here to the US in 2013. And I moved to LA. Yeah, and I've been",
+    "generated_text": "here for a little over a year now. I've been in LA for a little over a year now.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}

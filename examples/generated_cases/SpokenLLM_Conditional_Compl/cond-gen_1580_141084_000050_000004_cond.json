@@ -1,0 +1,9 @@
+{
+    "orig_text": " I'll take the armchair and the chair.",
+    "generated_text": "The 'armchair' is a rather unusual chair. It's made of wood and it's covered in leather.",
+    "extra_words": 16,
+    "text_top_p": 0.5,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.0,
+    "repetition_penalty": 1.0
+}
