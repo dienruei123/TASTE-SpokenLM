@@ -224,7 +224,7 @@ def generate(model_id, out_dir,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='./Llama-1B-TASTE-Speech-V0', type=str)
+    parser.add_argument('--model', default='MediaTek-Research/Llama-1B-TASTE-Speech-V0', type=str)
     parser.add_argument('--model_mode', default='stage2', type=str)
     parser.add_argument('--out_dir', default='./examples/generated_cases', type=str)
 
