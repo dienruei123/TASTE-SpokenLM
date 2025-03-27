@@ -134,7 +134,6 @@ class TasteSpokenLMConfig(PretrainedConfig):
         audio_embed_conv_mode='fill_forward',
         in_llm_module='weighted_sum',
         out_llm_module='weighted_layer',
-        _attn_implementation="flash_attention_2",
         use_lora=True,
         kwargs_for_lora=None,
         **kwargs
@@ -148,7 +147,6 @@ class TasteSpokenLMConfig(PretrainedConfig):
         self.audio_embed_conv_mode = audio_embed_conv_mode
         self.in_llm_module = in_llm_module
         self.out_llm_module = out_llm_module
-        self._attn_implementation = _attn_implementation
         self.use_lora = use_lora
         self.kwargs_for_lora = kwargs_for_lora
 

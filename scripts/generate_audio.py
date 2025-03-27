@@ -28,7 +28,7 @@ def pad_seq_collate_fn(batch, device=None):
     return padded
 
 
-def generate(model_id, out_dir, 
+def generate(model_id, out_dir, attn_implementation='eager',
         model_mode='SpokenLLM', conditional_compl=False, conditional_text_compl=False,
         extra_words=16, text_top_p=0.0, taste_top_p=0.0, text_temperature=1.0, repetition_penalty=1.0):
 
@@ -84,9 +84,9 @@ def generate(model_id, out_dir,
     device = 0
 
     if model_mode == 'SpokenLLM':
-        model = TasteForCausalLM.from_pretrained(model_id)
+        model = TasteForCausalLM.from_pretrained(model_id, attn_implementation=attn_implementation)
     else:
-        model = TasteForCausalLM.from_pretrained_stage1(model_id)
+        model = TasteForCausalLM.from_pretrained_stage1(model_id, attn_implementation=attn_implementation)
 
     model = model.to(device)
     model.eval()

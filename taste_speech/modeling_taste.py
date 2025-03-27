@@ -1260,7 +1260,9 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                     'unfreeze_hidden_layers_from_last': self.audio_tower_config.encoder__unfreeze_hidden_layers_from_last,
                     'whisper_config': config.asr_config,
                 },
-                kwargs_audio_segmenter={},
+                kwargs_audio_segmenter={
+                    'attn_implementation': config._attn_implementation,
+                },
                 kwargs_for_joint_encoder_segmenter=self.audio_tower_config.kwargs_for_joint_encoder_segmenter,
                 kwargs_for_quantizer=self.audio_tower_config.kwargs_for_quantizer,
             )
@@ -1337,7 +1339,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 audio_embed_conv_mode=self.spoken_lm_config.audio_embed_conv_mode,
                 in_llm_module=self.spoken_lm_config.in_llm_module,
                 out_llm_module=self.spoken_lm_config.out_llm_module,
-                _attn_implementation=self.spoken_lm_config._attn_implementation,
+                _attn_implementation=config._attn_implementation,
                 use_lora=self.spoken_lm_config.use_lora,
                 kwargs_for_lora=self.spoken_lm_config.kwargs_for_lora,
             )
