@@ -1,0 +1,9 @@
+{
+    "orig_text": " I've managed to save some",
+    "generated_text": "money on my phone bill, but I'm still paying a lot for my internet. I'm not sure if I should get a new phone or just get a new internet plan.",
+    "extra_words": 16,
+    "text_top_p": 0.2,
+    "taste_top_p": 0.0,
+    "text_temperature": 0.5,
+    "repetition_penalty": 1.1
+}

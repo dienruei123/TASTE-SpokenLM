@@ -1,0 +1,9 @@
+{
+    "orig_text": " Rainfall alone does not constitute a storm.",
+    "generated_text": "It is the combination of Rainfall and Wind that causes the most damage. In the case of a storm, the wind is the most important factor.",
+    "extra_words": 16,
+    "text_top_p": 0.2,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.5,
+    "repetition_penalty": 1.3
+}

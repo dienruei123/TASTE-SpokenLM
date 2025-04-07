@@ -1,0 +1,9 @@
+{
+    "orig_text": " This powder must not",
+    "generated_text": "be used in the presence of water or other liquids. It is a very fine powder and should be used with a fine powder applicator.",
+    "extra_words": 16,
+    "text_top_p": 0.2,
+    "taste_top_p": 0.0,
+    "text_temperature": 0.5,
+    "repetition_penalty": 1.1
+}

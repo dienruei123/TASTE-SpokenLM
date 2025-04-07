@@ -1,0 +1,9 @@
+{
+    "orig_text": " The dark mystery of",
+    "generated_text": "the lost city of Atlantis has fascinated mankind for centuries. It is said that the city was located in the Atlantic Ocean, off the coast of modern-day Portugal, and was home to a civilization that flourished for thousands of years.",
+    "extra_words": 16,
+    "text_top_p": 0.2,
+    "taste_top_p": 0.0,
+    "text_temperature": 0.5,
+    "repetition_penalty": 1.1
+}

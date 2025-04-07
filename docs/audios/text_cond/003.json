@@ -1,0 +1,9 @@
+{
+    "orig_text": " Other sweet herbs are cultivated",
+    "generated_text": "for their medicinal properties. They are used to treat a variety of ailments, including coughs, colds, and other respiratory problems.",
+    "extra_words": 16,
+    "text_top_p": 0.2,
+    "taste_top_p": 0.0,
+    "text_temperature": 1.5,
+    "repetition_penalty": 1.3
+}

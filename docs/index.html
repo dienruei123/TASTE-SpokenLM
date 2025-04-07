@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8">
+	<meta name="generator" content="Hugo 0.88.1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link href="https://fonts.googleapis.com/css?family=Roboto:300,400,700" rel="stylesheet" type="text/css">
+	<link rel="stylesheet" href=""https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.4/styles/github.min.css">
+	<link rel="stylesheet" href="css/custom.css">
+	<link rel="stylesheet" href="css/normalize.css">
+
+	<title>TASTE Speech Homepage</title>
+	<link href="css/bootstrap.min.css" rel="stylesheet">
+
+</head>
+
+
+<body data-new-gr-c-s-check-loaded="14.1091.0" data-gr-ext-installed="">
+
+<div class="container" >
+<header role="banner">
+</header>
+<main role="main">
+<article itemscope itemtype="https://schema.org/BlogPosting">
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<div class="text-center">
+	<h2>TASTE: Text-Aligned Speech Tokenization and Embedding for Spoken Language Modeling </h2>
+        [<a href="">Paper</a>]
+		[<a href="">Code</a>]
+        </p>
+        <p><b>MediaTek Research</b></p>
+	</div>
+	<p><b>Abstract:</b>
+        Abstract Here
+	<p style="text-align: center;">
+		<img src="pics/highlight.png" height="480" width="1280">
+	</p>
+</p>
+	</p>
+
+</div>
+
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<h2 id="stage1" style="text-align: center;">Overview of TASTE Speech Tokenization (Stage 1)</h2>
+	<body>
+	<p style="text-align: center;">
+		<img src="pics/overview-cosyvoice.png" height="400" width="1024">
+	</p>
+	</body>
+		<p style="text-align: center;" >
+			<b>Figure 1.</b> ...
+		</p>
+</div>
+
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<h2 id="stage1-recon" style="text-align: center;">Reconstruction</h2>
+    <p>say something
+    </p>
+    <br/>
+    <h3 style="vertical-align : middle;text-align: center"> In-domain (LibriTTS) Reconstruction </h3>
+    <div class="table-responsive pt-3">
+        <table class="table table-hover pt-2">
+            <thead>
+            <tr>
+                <th style="vertical-align : middle;text-align: center">Original </th>
+                <th style="vertical-align : middle;text-align: center">Conventional TTS with Speaker Embedding </th>
+                <!-- <th style="vertical-align : middle;text-align: center">TASTE Tokenization<br/> w/o VQ </th>
+                <th style="vertical-align : middle;text-align: center">TASTE Tokenization<br/> (RVQ Size: 256) </th> -->
+                <th style="vertical-align : middle;text-align: center">TASTE Tokenization </th>
+            </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/001.wav" autoplay/>Your browser does not support the audio element.</audio><br>I never expect to have any more.</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/001_text_only.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/001_taste.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/002.wav" autoplay/>Your browser does not support the audio element.</audio><br>He examines the horizon all round with his glass and folds his arms with the air of an injured man.</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/002_text_only.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/in_domain/002_taste.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+            </tbody>
+        </table>
+        <br/><br/>
+        <h3 style="vertical-align : middle;text-align: center"> Out-of-domain (Expresso) Reconstruction </h3>
+        <table class="table table-hover pt-2">
+            <thead>
+            <tr>
+                <th style="vertical-align : middle;text-align: center">Original </th>
+                <th style="vertical-align : middle;text-align: center">Conventional TTS with Speaker Embedding </th>
+                <!-- <th style="vertical-align : middle;text-align: center">TASTE Tokenization<br/> w/o VQ </th>
+                <th style="vertical-align : middle;text-align: center">TASTE Tokenization<br/> (RVQ Size: 256) </th> -->
+                <th style="vertical-align : middle;text-align: center">TASTE Tokenization </th>
+            </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_default_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_default_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 190px;"><source src="audios/recon/out_domain/ex02_default_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_default_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_confused_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[confused]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_confused_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_confused_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_confused_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_confused_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_enunciated_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[enunciated]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_enunciated_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_enunciated_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_enunciated_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_enunciated_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_happy_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[happy]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_happy_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_happy_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_happy_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_happy_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_laughing_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[laughing]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_laughing_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_laughing_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_laughing_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_laughing_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_sad_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[sad]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_sad_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_sad_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_sad_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_sad_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_whisper_00355.wav" autoplay/>Your browser does not support the audio element.</audio><br>[whisper]<br/> Given the circumstances, isn't this a little unorthodox?</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_whisper_00355_text.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <!-- <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_whisper_00355_wo_vq.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_whisper_00355_vq_k256.wav" autoplay/>Your browser does not support the audio element.</audio> </td> -->
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/recon/out_domain/ex02_whisper_00355_vq_k512.wav" autoplay/>Your browser does not support the audio element.</audio> </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<h2 id="stage2" style="text-align: center;">Overview of TASTE Spoken Language Modeling (Stage 2)</h2>
+	<body>
+	<p style="text-align: center;">
+		<img src="pics/overview-cosyvoice.png" height="400" width="1024">
+	</p>
+	</body>
+		<p style="text-align: center;" >
+			<b>Figure 2.</b> ...
+		</p>
+</div>
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<h2 id="stage2-generation" style="text-align: center;">Zero-shot In-context Generation</h2>
+    <p>say something
+    </p>
+    <br/>
+    <h3 style="vertical-align : middle;text-align: center">Audio Prompt </h3>
+    <div class="table-responsive pt-3">
+        <table class="table table-hover pt-2">
+            <thead>
+            <tr>
+                <th style="vertical-align : middle;text-align: center">Audio Prompt </th>
+                <th style="vertical-align : middle;text-align: center">Generated</th>
+            </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/001.wav" autoplay/>Your browser does not support the audio element.</audio><br>The dark mystery of</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/001_generated.wav" autoplay/>Your browser does not support the audio element.</audio><br>The dark mystery of the lost city of Atlantis has fascinated mankind for centuries. It is said that the city was located in the Atlantic Ocean, off the coast of modern-day Portugal, and was home to a civilization that flourished for thousands of years.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/002.wav" autoplay/>Your browser does not support the audio element.</audio><br>I've managed to save some</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/002_generated.wav" autoplay/>Your browser does not support the audio element.</audio><br>I've managed to save some money on my phone bill, but I'm still paying a lot for my internet. I'm not sure if I should get a new phone or just get a new internet plan.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/003.wav" autoplay/>Your browser does not support the audio element.</audio><br>I reserve your services</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/003_generated.wav" autoplay/>Your browser does not support the audio element.</audio><br>I reserve your services for a long time. I am very happy with the result. I will definitely recommend you to my friends.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/004.wav" autoplay/>Your browser does not support the audio element.</audio><br>This powder must not</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/004_generated.wav" autoplay/>Your browser does not support the audio element.</audio><br>This powder must not be used in the presence of water or other liquids. It is a very fine powder and should be used with a fine powder applicator.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/005.wav" autoplay/>Your browser does not support the audio element.</audio><br>I’ll take the armchair</td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/cond/005_generated.wav" autoplay/>Your browser does not support the audio element.</audio><br>I’ll take the armchair in the corner and just sit there. It’ll feel better. I’ll try to not sleep.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <br/><br/>
+    <h3 style="vertical-align : middle;text-align: center">Text-only Prompt </h3>
+    <div class="table-responsive pt-3">
+        <table class="table table-hover pt-2">
+            <thead>
+            <tr>
+                <th style="vertical-align : middle;text-align: center">Text-only Prompt </th>
+                <th style="vertical-align : middle;text-align: center">Generated</th>
+            </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><b>And then later on, fully acquiring that company.</b></td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/text_cond/001.wav" autoplay/>Your browser does not support the audio element.</audio><br>It’s a very good example of how you can use the power of a platform to create a business that's going to be successful.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><b>Rainfall alone does not constitute a storm.</b></td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/text_cond/002.wav" autoplay/>Your browser does not support the audio element.</audio><br>It is the combination of Rainfall and Wind that causes the most damage. In the case of a storm, the wind is the most important factor.</td>
+                </tr>
+                <tr>
+                    <td style="vertical-align : top;text-align:center;"><b>Other sweet herbs are cultivated</b></td>
+                    <td style="vertical-align : top;text-align:center;"><audio controls="controls" style="width: 350px;"><source src="audios/text_cond/003.wav" autoplay/>Your browser does not support the audio element.</audio><br>for their medicinal properties. They are used to treat a variety of ailments, including coughs, colds, and other respiratory problems.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="container pt-5 mt-5 shadow-lg p-5 mb-5 bg-white rounded">
+	<h2 style="text-align: center;">Disclaimer</h2>
+	<p>The content provided above is for academic purposes only and is intended to demonstrate technical capabilities. Some examples are sourced from the internet. If any content infringes on your rights, please contact us to request its removal.</p>
+</div>
+
+</article>
+</main>
+</div>
+
+</body>
+<!-- Optional JavaScript -->
+<!-- jQuery first, then Popper.js, then Bootstrap JS -->
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"
+	integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo"
+	crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+	integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+	crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+	integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+	crossorigin="anonymous"></script>
+
+<script>
+	function updateAudio(playerId, sliderValueId) {
+		var slider = document.getElementById(playerId.replace('audioPlayer', 'slider'));
+		var sliderValue = document.getElementById(sliderValueId);
+		var audioSource = document.getElementById(playerId.replace('audioPlayer', 'audioSource'));
+		var audioPlayer = document.getElementById(playerId);
+
+		var value = slider.value;
+		sliderValue.textContent = value;
+
+		var audioFileName = 'audio/' + value.toFixed(1) + '.mp3';
+
+		audioSource.src = audioFileName;
+
+		audioPlayer.load();
+	}
+</script>
+
+</html>
