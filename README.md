@@ -5,10 +5,17 @@
 
 ## Quick Start
 
+Install the `taste_speech` package
 ```
-git clone https://github.com/GitYCC/LLaMA-TASTE-Speech.git
+git clone https://github.com/mtkresearch/TASTE-SpokenLM.git
 cd LLaMA-TASTE-Speech
 pip install .
+```
+
+Install some dependencies,
+```
+pip install -q torch transformers 
+pip install -q einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 
 ```
 
 ### Inference Completion
