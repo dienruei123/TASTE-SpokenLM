@@ -14,15 +14,20 @@ pip install .
 
 Install some dependencies,
 ```
-pip install -q torch transformers 
+pip install -q torch torchaudio transformers 
 pip install -q einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 
 ```
 
 ### Inference Completion
 
 ```python
+from datasets import Dataset
+import torchaudio
+
+from taste_speech import TasteConfig, TasteForCausalLM, TasteProcessor
+
 device = 0
-model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
+model_id = 'MediaTek-Research/Llama-1B-TASTE-V0'
 attn_implementation = 'eager'
 
 model = TasteForCausalLM.from_pretrained(model_id, attn_implementation=attn_implementation)
@@ -43,8 +48,8 @@ generate_kwargs = dict(
     repetition_penalty=1.1,
 )
 
-conditional_audio_paths = ['/path/to/audio']
-output_audio_paths = ['/path/to/output_audio']
+conditional_audio_paths = ['/path/to/audio.wav']
+output_audio_paths = ['/path/to/generated_audio.wav']
 sampling_rate = 16000
 
 data = [
@@ -58,10 +63,11 @@ data = [
 dataset = Dataset.from_list(data)
 
 for inputs, output_fpath in zip(data, output_audio_paths):
-    inputs = {k: inputs[k].to(device) for k in cols}
+    inputs = {k: inputs[k].to(device) for k in inputs.keys()}
     output = model.inference_completion(
         **inputs,
         conditional_mode='audio',
+        **generate_kwargs,
     )
     tts_speech, tts_sr = generator.inference(
         speech_token_ids=output['speech_token_ids'], 
