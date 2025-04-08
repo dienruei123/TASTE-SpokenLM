@@ -8,7 +8,7 @@
 Install the `taste_speech` package
 ```
 git clone https://github.com/mtkresearch/TASTE-SpokenLM.git
-cd LLaMA-TASTE-Speech
+cd TASTE-SpokenLM
 pip install .
 ```
 
