@@ -14,6 +14,7 @@ from transformers import pipeline
 from transformers import BatchFeature, ProcessorMixin
 from transformers import WhisperProcessor, AutoTokenizer
 from transformers.utils.hub import cached_file
+from torch.nn.utils.rnn import pad_sequence
 
 from .modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
 from .configuration_taste import TasteConfig
@@ -27,6 +28,22 @@ def load_wav(wav, target_sr):
         assert sample_rate > target_sr, 'wav sample rate {} must be greater than {}'.format(sample_rate, target_sr)
         speech = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)(speech)
     return speech.numpy()
+
+
+def pad_seq_collate_fn(batch, device=None):
+    padded = {}
+    for key in batch[0].keys():
+        packed_list = [
+            x[key][0].clone().detach() if isinstance(x[key][0], torch.Tensor) else torch.tensor(x[key][0]) 
+            for x in batch
+        ]
+        if 'length' in key:
+            padded_tensor = torch.tensor(packed_list)
+        else:
+            padded_tensor = pad_sequence(packed_list, batch_first=True, padding_value=0)
+
+        padded[key] = padded_tensor.to(device) if device is not None else padded_tensor
+    return padded
 
 
 class TasteProcessor(ProcessorMixin):
