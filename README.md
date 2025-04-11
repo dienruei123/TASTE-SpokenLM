@@ -18,7 +18,8 @@ pip install .
 
 Install some dependencies,
 ```
-pip install -q torch torchaudio transformers 
+pip install -q torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
+pip install -q transformers 
 pip install -q einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 
 ```
 
