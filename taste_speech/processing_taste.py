@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from transformers import pipeline
 from transformers import BatchFeature, ProcessorMixin
 from transformers import WhisperProcessor, AutoTokenizer
-from transformers.utils.hub import cached_file
+from transformers.utils.hub import cached_file, cached_files
 from torch.nn.utils.rnn import pad_sequence
 
 from .modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
@@ -44,6 +44,16 @@ def pad_seq_collate_fn(batch, device=None):
 
         padded[key] = padded_tensor.to(device) if device is not None else padded_tensor
     return padded
+
+
+LLAMA_FILES = [
+    f'llama_tokenizer/{fn}'
+    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json']
+]
+WHISPER_FILES = [
+    f'whisper_tokenizer/{fn}'
+    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'added_tokens.json', 'preprocessor_config.json', 'vocab.json']
+]
 
 
 class TasteProcessor(ProcessorMixin):
@@ -79,11 +89,12 @@ class TasteProcessor(ProcessorMixin):
             pretrained_model_name_or_path, cache_dir=cache_dir, force_download=force_download,
             local_files_only=local_files_only, token=token, revision=revision, **kwargs)
 
-        
         text_model_name_or_path = os.path.dirname(
-            cached_file(pretrained_model_name_or_path, 'llama_tokenizer/tokenizer.json')) # config.text_config.name_or_path
+            cached_files(pretrained_model_name_or_path, LLAMA_FILES)[0]
+        )   # config.text_config.name_or_path
         asr_model_name_or_path = os.path.dirname(
-            cached_file(pretrained_model_name_or_path, 'whisper_tokenizer/tokenizer.json')) # config.asr_config.name_or_path
+            cached_files(pretrained_model_name_or_path, WHISPER_FILES)[0]
+        ) # config.asr_config.name_or_path
 
         audio_processor = WhisperProcessor.from_pretrained(asr_model_name_or_path)
         audio_tokenizer = AutoTokenizer.from_pretrained(asr_model_name_or_path)
