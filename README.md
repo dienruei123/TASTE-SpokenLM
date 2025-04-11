@@ -1,6 +1,6 @@
 # TASTE: Text-Aligned Speech Tokenization and Embedding for Spoken Language Modeling
 
-[[Demo](https://mtkresearch.github.io/TASTE-SpokenLM.github.io/)] [[Paper](https://arxiv.org/abs/2504.07053)] [[Model](https://huggingface.co/MediaTek-Research/Llama-1B-TASTE-V0)]
+[[Demo](https://mtkresearch.github.io/TASTE-SpokenLM.github.io/)] [[Paper](https://arxiv.org/abs/2504.07053)] [[Model](https://huggingface.co/MediaTek-Research/Llama-1B-TASTE-V0)]  [[Playground](https://www.kaggle.com/code/ycckaggle/playground-taste)]
 
 <b>Liang-Hsuan Tseng*, Yi-Chang Chen*, Kuan-Yi Lee, Da-Shan Shiu, Hung-yi Lee</b><br/>*Equal contribution
 
