@@ -52,7 +52,8 @@ LLAMA_FILES = [
 ]
 WHISPER_FILES = [
     f'whisper_tokenizer/{fn}'
-    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'added_tokens.json', 'preprocessor_config.json', 'vocab.json']
+    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'added_tokens.json', 
+               'preprocessor_config.json', 'vocab.json', 'merges.txt']
 ]
 
 
