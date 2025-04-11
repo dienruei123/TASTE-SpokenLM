@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name='taste_speech',
-    version='0.0.1',
+    version='0.0.2',
     license='',
     author='',
     author_email='',
