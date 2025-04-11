@@ -50,11 +50,6 @@ LLAMA_FILES = [
     f'llama_tokenizer/{fn}'
     for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json']
 ]
-WHISPER_FILES = [
-    f'whisper_tokenizer/{fn}'
-    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'added_tokens.json', 
-               'preprocessor_config.json', 'vocab.json', 'merges.txt']
-]
 
 
 class TasteProcessor(ProcessorMixin):
@@ -94,9 +89,7 @@ class TasteProcessor(ProcessorMixin):
             file = cached_file(pretrained_model_name_or_path, path)
         text_model_name_or_path = os.path.dirname(file)   # config.text_config.name_or_path
 
-        for path in WHISPER_FILES:
-            file = cached_file(pretrained_model_name_or_path, path)
-        asr_model_name_or_path = os.path.dirname(file) # config.asr_config.name_or_path
+        asr_model_name_or_path = config.asr_config.name_or_path
 
         audio_processor = WhisperProcessor.from_pretrained(asr_model_name_or_path)
         audio_tokenizer = AutoTokenizer.from_pretrained(asr_model_name_or_path)
