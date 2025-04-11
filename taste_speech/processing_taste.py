@@ -79,8 +79,8 @@ class TasteProcessor(ProcessorMixin):
             pretrained_model_name_or_path, cache_dir=cache_dir, force_download=force_download,
             local_files_only=local_files_only, token=token, revision=revision, **kwargs)
         
-        text_model_name_or_path = config.text_config.name_or_path
-        asr_model_name_or_path = config.asr_config.name_or_path
+        text_model_name_or_path = cached_file(pretrained_model_name_or_path, 'llama_tokenizer/') # config.text_config.name_or_path
+        asr_model_name_or_path = cached_file(pretrained_model_name_or_path, 'whisper_tokenizer/') # config.asr_config.name_or_path
 
         audio_processor = WhisperProcessor.from_pretrained(asr_model_name_or_path)
         audio_tokenizer = AutoTokenizer.from_pretrained(asr_model_name_or_path)
