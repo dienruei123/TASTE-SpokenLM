@@ -83,8 +83,25 @@ for inputs, output_fpath in zip(data, output_audio_paths):
     torchaudio.save(output_fpath, tts_speech, tts_sr)
 ```
 
+
+
 ### Run Inference
 
 ```
 python scripts/generate_audio.py --conditional_compl
 ```
+
+## Citation
+
+```
+@misc{tseng2025tastetextalignedspeechtokenization,
+      title={TASTE: Text-Aligned Speech Tokenization and Embedding for Spoken Language Modeling}, 
+      author={Liang-Hsuan Tseng and Yi-Chang Chen and Kuan-Yi Lee and Da-Shan Shiu and Hung-yi Lee},
+      year={2025},
+      eprint={2504.07053},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2504.07053}, 
+}
+```
+
