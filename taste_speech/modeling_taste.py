@@ -1093,8 +1093,8 @@ class TasteSpokenLM(nn.Module):
             inputs_embeds = single_inputs_embeds[1:text_input_length, :].unsqueeze(0).to(dtype=llm_dtype, device=device)
             input_ids = llm_token_ids[:, 1:]
 
-            instruct_prefix_ids = kwargs.get('instruct_prefix_ids')
-            instruct_suffix_ids = kwargs.get('instruct_suffix_ids')
+            instruct_prefix_ids = kwargs.get('instruct_prefix_ids').view(1, -1)
+            instruct_suffix_ids = kwargs.get('instruct_suffix_ids').view(1, -1)
             instruct_prefix_embeds = llm_embed_tokens(instruct_prefix_ids)
             instruct_suffix_embeds = llm_embed_tokens(instruct_suffix_ids)
 
@@ -1674,9 +1674,9 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
 
         **kwargs,
     ):
-        assert conditional_mode in ('zero', 'text', 'audio')
+        assert conditional_mode in ('zero', 'text', 'audio', 'instruct')
 
-        if conditional_mode == 'audio':
+        if conditional_mode in ('audio', 'instruct'):
             _, llm_indices = self.extract_vq(
                 asr_token_ids,
                 asr_token_lengths,
@@ -1699,15 +1699,24 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         )
 
         vq_module = self.audio_tower.vq.rvq
+        kwargs_for_spoken_lm_generate = dict(
+            llm_indices=llm_indices, 
+            llm_token_ids=llm_token_ids, 
+            llm_token_lengths=llm_token_lengths, 
+            llm_word_ids=llm_word_ids,
+            extra_words=extra_words
+        )
+        if conditional_mode == 'instruct':
+            kwargs_for_spoken_lm_generate.update(dict(
+                instruct_prefix_ids=kwargs.get('instruct_prefix_ids'),
+                instruct_suffix_ids=kwargs.get('instruct_suffix_ids'),
+                stop_id=kwargs.get('stop_id'),
+            ))
         generated_llm_indices, generated_llm_token_ids, _, generated_llm_word_ids = \
             self.spoken_lm.generate(
                 vq_module,
                 conditional_mode,
-                llm_indices=llm_indices, 
-                llm_token_ids=llm_token_ids, 
-                llm_token_lengths=llm_token_lengths, 
-                llm_word_ids=llm_word_ids,
-                extra_words=extra_words
+                **kwargs_for_spoken_lm_generate
             )
 
         debug_print(generated_llm_indices, 'generated_llm_indices')
