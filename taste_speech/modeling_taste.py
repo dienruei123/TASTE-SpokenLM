@@ -1050,9 +1050,14 @@ class TasteSpokenLM(nn.Module):
 
         if conditional_mode == 'text':
             has_prefix = False
+            stop_id = None
+        elif conditional_mode == 'instruct':
+            has_prefix = False
+            stop_id = kwargs.get('stop_id')
         else:
             has_prefix = (llm_token_ids is not None)
-        self.taste_sampler.reset(extra_words=extra_words, has_prefix=has_prefix)
+            stop_id = None
+        self.taste_sampler.reset(extra_words=extra_words, has_prefix=has_prefix, stop_id=stop_id)
 
         device = base.device
 
@@ -1076,6 +1081,25 @@ class TasteSpokenLM(nn.Module):
             inputs_embeds = single_inputs_embeds[:text_input_length, :].unsqueeze(0).to(dtype=llm_dtype, device=device)
             pending_audio_embed = single_audio_embed[text_input_length - 1:, :]
             input_ids = llm_token_ids
+        elif conditional_mode == 'instruct':
+            single_inputs_embeds, single_taste_labels, single_audio_embed = self._prepare_single(
+                llm_embed_tokens, vq_module, 
+                single_indices=llm_indices[0], 
+                single_token_ids=llm_token_ids[0], 
+                single_word_ids=llm_word_ids[0],
+                output_audio_embed=True
+            )
+            text_input_length = llm_token_lengths[0].item() + 1
+            inputs_embeds = single_inputs_embeds[1:text_input_length, :].unsqueeze(0).to(dtype=llm_dtype, device=device)
+            input_ids = llm_token_ids[:, 1:]
+
+            instruct_prefix_ids = kwargs.get('instruct_prefix_ids')
+            instruct_suffix_ids = kwargs.get('instruct_suffix_ids')
+            instruct_prefix_embeds = llm_embed_tokens(instruct_prefix_ids)
+            instruct_suffix_embeds = llm_embed_tokens(instruct_suffix_ids)
+
+            inputs_embeds = torch.concat([instruct_prefix_embeds, inputs_embeds, instruct_suffix_embeds], dim=1)
+            input_ids = torch.concat(instruct_prefix_ids, input_ids, instruct_suffix_ids], dim=1)
 
         generated_llm_indices, generated_llm_token_ids, generated_llm_token_lengths, generated_llm_word_ids = None, None, None, None
 
