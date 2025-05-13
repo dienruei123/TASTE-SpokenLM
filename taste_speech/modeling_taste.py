@@ -1099,7 +1099,7 @@ class TasteSpokenLM(nn.Module):
             instruct_suffix_embeds = llm_embed_tokens(instruct_suffix_ids)
 
             inputs_embeds = torch.concat([instruct_prefix_embeds, inputs_embeds, instruct_suffix_embeds], dim=1)
-            input_ids = torch.concat(instruct_prefix_ids, input_ids, instruct_suffix_ids], dim=1)
+            input_ids = torch.concat([instruct_prefix_ids, input_ids, instruct_suffix_ids], dim=1)
 
         generated_llm_indices, generated_llm_token_ids, generated_llm_token_lengths, generated_llm_word_ids = None, None, None, None
 
