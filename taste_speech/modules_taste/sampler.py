@@ -72,7 +72,7 @@ class TasteSampler:
         logits_processed = logits.scatter(1, input_ids, score)
         return logits_processed
 
-    def reset(self, extra_words, has_prefix=True):
+    def reset(self, extra_words, has_prefix=True, stop_id=None):
         self.word_start_history = []
         self._end_countdown = None
         self._extra_words = extra_words
@@ -80,6 +80,7 @@ class TasteSampler:
         self._end_text_sampling = False
         self._word_counter = 0
         self.has_prefix = has_prefix
+        self.stop_id = stop_id
 
     def text_sample(self, text_logits, text_top_p, input_ids):
         greedy = text_top_p == 0.0
@@ -139,7 +140,9 @@ class TasteSampler:
         else:
             taste_ids = torch.tensor([[[IGNORE_ID] * 4]], device=taste_logits.device, dtype=torch.int64)
 
-        if ((self._word_counter >= self._extra_words) and (text_id in self.sentance_end_set)) or (self._word_counter >= self._max_words):
+        if ((self._word_counter >= self._extra_words) and (text_id in self.sentance_end_set)) \
+                    or (self._word_counter >= self._max_words) \
+                    or (self.stop_id is not None and text_id == self.stop_id):
             self._end_text_sampling = True
 
         if is_word_start:
