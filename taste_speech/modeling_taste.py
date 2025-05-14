@@ -1672,6 +1672,9 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         audio_features=None,
         audio_feature_lengths=None,
 
+        output_text_only=False,
+        debug=False,
+
         **kwargs,
     ):
         assert conditional_mode in ('zero', 'text', 'audio', 'instruct')
@@ -1719,11 +1722,17 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 **kwargs_for_spoken_lm_generate
             )
 
-        debug_print(generated_llm_indices, 'generated_llm_indices')
-        debug_print(generated_llm_word_ids, 'generated_llm_word_ids')
+        if debug:
+            debug_print(generated_llm_indices, 'generated_llm_indices')
+            debug_print(generated_llm_word_ids, 'generated_llm_word_ids')
 
         # process on generated part
         generated_text = llm_tokenizer.decode(generated_llm_token_ids[0]).strip()
+
+        if output_text_only:
+            return {
+                'generated_text': generated_text
+            }
 
         words = [' ' + w for w in re.split(r'\s', generated_text)]
 
