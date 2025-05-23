@@ -113,8 +113,10 @@ class TasteSampler:
     def update(self, text_logits, taste_logits, input_ids):
         text_id = self.text_sample(text_logits, self.text_top_p, input_ids)
 
-        # is_wait_for_taste = (self._word_counter >= self._extra_words) and (text_id in self.sentance_end_set)
+        # when text sampling ends, start waiting for taste token sampling
         is_wait_for_taste = self._end_text_sampling
+
+        # check if locating at word-start and update self._end_countdown
         if self._word_counter == 0: # begin
             is_word_start = True
         elif is_wait_for_taste: # wait for taste
@@ -125,29 +127,26 @@ class TasteSampler:
             is_word_start = True
         else:
             is_word_start = text_id in self.word_start_set
-        
+
+        # update history of is_word_start
         self.word_start_history.append(is_word_start)
 
-        if self.delay_level == 'token':
-            is_started_sampling_taste =  (len(self.word_start_history) > self.delay)
-            is_sampling = is_started_sampling_taste and self.word_start_history[-1-self.delay]
-        elif self.delay_level == 'word':
-            is_started_sampling_taste = (sum([1 if s else 0 for s in self.word_start_history]) > self.delay)
-            is_sampling = is_started_sampling_taste and is_word_start
-
-        if is_sampling:
-            taste_ids = self.taste_sample(taste_logits, taste_top_p=self.taste_top_p)
-        else:
-            taste_ids = torch.tensor([[[IGNORE_ID] * 4]], device=taste_logits.device, dtype=torch.int64)
-
+        # check if text sampling end
         if ((self._word_counter >= self._extra_words) and (text_id in self.sentance_end_set)) \
-                    or (self._word_counter >= self._max_words) \
-                    or (self.stop_id is not None and text_id == self.stop_id):
+                    or (self._word_counter >= self._max_words):
             self._end_text_sampling = True
 
+        # stop (not include the stop_id)
+        if self.stop_id is not None and text_id == self.stop_id:
+            self._end_text_sampling = True
+            self._end_countdown = self.delay - 1
+            is_wait_for_taste = True
+
+        # update word_counter
         if is_word_start:
             self._word_counter += 1
 
+        # determine action
         is_end = (self._end_countdown == 0)
         if is_end:
             action = 'terminate'
@@ -158,6 +157,21 @@ class TasteSampler:
         else:
             action = 'continue_not_at_word_start'
 
+        # check if sampling taste
+        if self.delay_level == 'token':
+            is_started_sampling_taste =  (len(self.word_start_history) > self.delay)
+            is_taste_sampling = is_started_sampling_taste and self.word_start_history[-1-self.delay]
+        elif self.delay_level == 'word':
+            is_started_sampling_taste = (sum([1 if s else 0 for s in self.word_start_history]) > self.delay)
+            is_taste_sampling = is_started_sampling_taste and is_word_start
+
+        # sample taste_ids
+        if is_taste_sampling:
+            taste_ids = self.taste_sample(taste_logits, taste_top_p=self.taste_top_p)
+        else:
+            taste_ids = torch.tensor([[[IGNORE_ID] * 4]], device=taste_logits.device, dtype=torch.int64)
+
+        # determine taste_action
         if is_started_sampling_taste:
             taste_action = 'sample'
         elif self.has_prefix:
