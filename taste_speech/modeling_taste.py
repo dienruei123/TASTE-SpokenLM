@@ -1751,7 +1751,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         generated_asr_word_ids = torch.tensor([generated_asr_word_ids_list], dtype=torch.int32, device=device)
 
         # combine original parts and generated parts
-        if out_generated_part_only or conditional_mode in ('zero', 'text'):
+        if out_generated_part_only or conditional_mode in ('zero', 'text', 'instruct'):
             llm_indices = generated_llm_indices
             asr_token_ids = generated_asr_token_ids
             asr_token_lengths = generated_asr_token_lengths
