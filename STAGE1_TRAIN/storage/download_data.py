@@ -11,7 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 snapshot_download(
     repo_id=repo_id,
     repo_type="dataset",
-    allow_patterns=["data/test", "data/dev"],
+    allow_patterns=["data/test/*arrow", "data/dev/*arrow"],
     local_dir=current_dir,
 )
 
@@ -19,6 +19,6 @@ snapshot_download(
 snapshot_download(
     repo_id=repo_id,
     repo_type="dataset",
-    allow_patterns=["data/train"],
+    allow_patterns=["data/train/*-0007*-of-04908*arrow"],
     local_dir=current_dir,
 )
