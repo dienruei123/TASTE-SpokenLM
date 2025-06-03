@@ -1,0 +1,37 @@
+# set random seed, so that you may reproduce your result.
+__set_seed1: !apply:random.seed [1986]
+__set_seed2: !apply:numpy.random.seed [1986]
+__set_seed3: !apply:torch.manual_seed [1986]
+__set_seed4: !apply:torch.cuda.manual_seed_all [1986]
+
+text_encoder_input_size: 512
+audio_embed_dim: 512
+
+audio_tokenizer: !new:cosyvoice.audio.audio_tokenizer.SenseVoiceAudioTokenizer
+    audio_encoder: !new:cosyvoice.audio.audio_encoder.SenseVoiceAudioEncoder
+        model_card: "/proj/mtklmadm/dev/mtk53678/rtslm_storage/pretrained_models/SenseVoiceSmall"
+        model_code_dir: "/proj/mtklmadm/dev/mtk53678/rtslm/CosyVoice/cosyvoice/audio/customized_sensevoice/model.py"
+        # dither: 0.0 # set to default value (1.0) to allow data aug
+        hub: "ms" # modelscope
+        prepend_inputs_before_encoding: True
+        extract_hidden: True
+    audio_segmenter: !new:cosyvoice.audio.audio_segmenter.CrossAttentionSegmenter
+        is_word_level: True
+        audio_decoder: !new:cosyvoice.transformer.audio_decoder.AudioTransformerDecoder
+            input_size: !ref <text_encoder_input_size>
+            output_size: !ref <audio_embed_dim>
+            attention_heads: 16
+            linear_units: 4096
+            num_blocks: 4
+            dropout_rate: 0.1
+            positional_dropout_rate: 0.1
+            self_attention_dropout_rate: 0
+            src_attention_dropout_rate: 0
+            input_layer: 'linear'
+            pos_enc_layer_type: 'rel_pos_espnet'
+            # selfattention_layer_type: 'selfattn' # currently rel_selfattn is not available
+            # static_chunk_size: 1
+    audio_quantizer: !new:cosyvoice.audio.audio_quantizer.BaseAudioQuantizer
+        dim: !ref <audio_embed_dim>
+        codebook_size: 1024
+        codebook_dim: 64

@@ -1,0 +1,88 @@
+exp_name: 0212_taslm_1B_eos-rvq
+
+# resume_dir: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/SpokenLM/taslm/exp/0208_baseline_1B_s3-pad/checkpoint-110000
+exp_root: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/SpokenLM/taslm/exp
+tensorboard_root: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/SpokenLM/taslm/tb
+
+slm_config_dict:
+    speech_token_size: 512
+    speech_vocab_size: 512
+    speech_num_channels: 4
+    fusion_method: 'addition'
+    speech_token_type: 'taste_0208_stg2_eos_rvq-d256-l4-k512_sum_smaller-lr'
+    speech_tokenizer_pretrained_dir: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/CosyVoice/examples/emilia/taste/exp/llm/torch_ddp/stage2/0208_stg2_eos_rvq-d256-l4-k512_sum_smaller-lr
+    speech_tokenizer_hidden_size: 1280
+    speech_embed_directly_use_rvq: true
+    speech_tokenizer_rvq_kwargs: #copied from the token config
+        dim: 1280
+        num_quantizers: 4
+        codebook_dim: 256
+        codebook_size: 512
+        decay: 0.99
+        quantize_dropout: true
+        kmeans_init: False
+    speech_multi_channel_loss_decay_factor: 0.52
+    # ====================================
+    llama_pretrained_dir: /proj/mtklmadm/models/mtk53678/Llama-3.2-1B
+    # llama_use_liger_kernel: true
+    attn_implementation: flash_attention_2 # use sdpa for non-causal attn
+
+
+use_lora: true
+lora_model_dir:
+lora_r: 16
+lora_alpha: 16
+lora_dropout: 0.1
+lora_target_linear: true
+lora_target_modules: 
+lora_fan_in_fan_out:
+lora_modules_to_save:
+
+modules_to_finetune:
+   - speech_embed_tokens
+   - speech_head
+
+
+train_data_list: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/SpokenLM/taslm/data/0207_eos/train.data.list
+eval_data_list: /proj/mtklmadm/dev/mtk53678/rtslm_storage/code/rtslm/SpokenLM/taslm/data/0207_eos/dev.data.list
+
+collate_fn_name: pad_seq_collate_fn_for_taste
+collate_fn_kwargs:
+    map_orig_eos_to_special_token_id: 128002 # you have to set repeat token to true for using two special tokens
+    ensure_alignment: false
+    add_bos: true
+    add_eos: true
+    speech_pad_idx: 0
+    speech_bos_idx: 0
+    speech_eos_idx: 0
+    speech_token_column_name: 'llm_aligned_taste_token_ids'
+    text_token_column_name: 'llm_text_token_ids'
+    # add_spk_emb: false
+
+actual_batch_size: 512
+micro_batch_size: 64
+gradient_accumulation_steps: 1
+test_micro_batch_size: 64
+test_on_begin: true
+num_epochs: 3
+logging_steps: 100
+eval_steps: 5000
+eval_epochs:
+optimizer: adamw_torch
+lr_scheduler: cosine
+warmup_steps: 20000
+weight_decay: 0.01
+learning_rate: 1e-5
+max_grad_norm: 5.0
+gradient_checkpointing: true
+use_liger_kernel: true
+use_bf16: true
+
+deepspeed: ./deepspeed_conf/zero2.json
+# deepspeed: ./deepspeed_configs/zero2.json
+# deepspeed: ./deepspeed_conf/zero2.json
+
+# special_tokens:
+#    pad_token: <|end_of_text|>
+
+seed: 42

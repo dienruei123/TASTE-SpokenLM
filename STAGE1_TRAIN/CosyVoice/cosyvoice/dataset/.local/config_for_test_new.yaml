@@ -1,0 +1,90 @@
+# set random seed, so that you may reproduce your result.
+__set_seed1: !apply:random.seed [1986]
+__set_seed2: !apply:numpy.random.seed [1986]
+__set_seed3: !apply:torch.manual_seed [1986]
+__set_seed4: !apply:torch.cuda.manual_seed_all [1986]
+
+# fixed params
+sample_rate: 22050
+text_encoder_input_size: 512
+llm_input_size: 1024
+llm_output_size: 1024
+spk_embed_dim: 192
+# others
+# add_eos: True
+# whisper_tokenizer_fpath: /proj/mtklmadm/dev/mtk53678/rtslm_storage/pretrained_models/distil-whisper-large-v3
+
+
+# model params
+# for all class/function included in this repo, we use !<name> or !<new> for intialization, so that user may find all corresponding class/function according to one single yaml.
+# for system/third_party class/function, we do not require this.
+
+# processor functions
+parquet_opener: !name:cosyvoice.dataset.processor.parquet_opener
+get_tokenizer: !name:whisper.tokenizer.get_tokenizer
+    multilingual: True
+    num_languages: 100
+    language: 'en'
+    task: 'transcribe'
+allowed_special: 'all'
+tokenize: !name:cosyvoice.dataset.processor.tokenize_by_words
+    get_tokenizer: !ref <get_tokenizer>
+    allowed_special: !ref <allowed_special>
+    use_asr_text: True
+# tokenize_whisper: !name:cosyvoice.dataset.processor.tokenize_whisper
+#     whisper_tokenizer_name_or_fpath: !ref <whisper_tokenizer_fpath>
+#     task: 'transcribe'
+#     language: 'en'
+#     no_timestamps: True
+#     add_bos: True
+#     add_eos: !ref <add_eos>
+#     use_asr_text: True
+#     overwrite_text_token: True
+#     use_wrapped: True
+filter: !name:cosyvoice.dataset.processor.filter
+    max_length: 40960
+    min_length: 0
+    token_max_length: 200
+    token_min_length: 1
+resample: !name:cosyvoice.dataset.processor.resample
+    resample_rate: !ref <sample_rate>
+feat_extractor: !name:matcha.utils.audio.mel_spectrogram
+    n_fft: 1024
+    num_mels: 80
+    sampling_rate: !ref <sample_rate>
+    hop_size: 256
+    win_size: 1024
+    fmin: 0
+    fmax: 8000
+    center: False
+compute_fbank: !name:cosyvoice.dataset.processor.compute_fbank
+    feat_extractor: !ref <feat_extractor>
+parse_embedding: !name:cosyvoice.dataset.processor.parse_embedding
+    normalize: True
+shuffle: !name:cosyvoice.dataset.processor.shuffle
+    shuffle_size: 1000
+sort: !name:cosyvoice.dataset.processor.sort
+    sort_size: 500  # sort_size should be less than shuffle_size
+batch: !name:cosyvoice.dataset.processor.batch
+    batch_type: 'dynamic'
+    max_frames_in_batch: 20000
+padding: !name:cosyvoice.dataset.processor.padding
+    use_spk_embedding: False # change to True during sft
+
+# dataset processor pipeline
+data_pipeline: [
+    !ref <parquet_opener>,
+    !ref <tokenize>,
+    # !ref <tokenize_whisper>,
+    !ref <filter>,
+    !ref <resample>,
+    !ref <compute_fbank>,
+    !ref <parse_embedding>,
+    !ref <shuffle>,
+    !ref <sort>,
+    !ref <batch>,
+    !ref <padding>,
+]
+
+
+test_dataset_parquet_data_list_fpath: /data/mtk53598/TASTE-post/rtslm/CosyVoice/examples/emilia/taste/data/train.data.list

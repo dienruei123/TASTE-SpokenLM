@@ -1,0 +1,115 @@
+# set random seed, so that you may reproduce your result.
+__set_seed1: !apply:random.seed [1986]
+__set_seed2: !apply:numpy.random.seed [1986]
+__set_seed3: !apply:torch.manual_seed [1986]
+__set_seed4: !apply:torch.cuda.manual_seed_all [1986]
+
+# fixed params
+sample_rate: 22050
+text_encoder_input_size: 512
+llm_input_size: 1024
+llm_output_size: 1024
+spk_embed_dim: 192
+## for audio branch
+audio_embed_dim: 512
+audio_token_encoder_input_size: 512
+
+# model params
+# for all class/function included in this repo, we use !<name> or !<new> for intialization, so that user may find all corresponding class/function according to one single yaml.
+# for system/third_party class/function, we do not require this.
+llm: !new:cosyvoice.llm.audio_llm.TransformerJointLM
+    # load_partial_list: ['text_encoder']
+    freeze_partial_list: ['audio_tokenizer.audio_encoder']
+    freeze_partial_during_init: True
+    text_encoder_input_size: !ref <text_encoder_input_size>
+    llm_input_size: !ref <llm_input_size>
+    llm_output_size: !ref <llm_output_size>
+    text_token_size: 51866
+    speech_token_size: 4096
+    length_normalized_loss: True
+    lsm_weight: 0
+    spk_embed_dim: !ref <spk_embed_dim>
+    # for audio branch
+    audio_embed_dim: !ref <audio_embed_dim>
+    audio_token_encoder_input_size: !ref <audio_token_encoder_input_size>
+    is_word_level: False
+    fuse_encoded_audio_text_type: 'concat'
+    fuse_encoded_audio_text_kwargs: 
+        audio_first: True
+    audio_tokenizer: !new:cosyvoice.audio.audio_tokenizer.SenseVoiceAudioTokenizer
+        audio_encoder: !new:cosyvoice.audio.audio_encoder.SenseVoiceAudioEncoder
+            model_card: "/proj/mtklmadm/dev/mtk53678/rtslm_storage/pretrained_models/SenseVoiceSmall"
+            model_code_dir: "/proj/mtklmadm/dev/mtk53678/rtslm/CosyVoice/cosyvoice/audio/customized_sensevoice/model.py"
+            # dither: 0.0 # set to default value (1.0) to allow data aug
+            hub: "ms" # modelscope
+        audio_segmenter: !new:cosyvoice.audio.audio_segmenter.CrossAttentionSegmenter
+            is_word_level: False
+            audio_decoder: !new:cosyvoice.transformer.audio_decoder.AudioTransformerDecoder
+                input_size: !ref <text_encoder_input_size>
+                output_size: !ref <audio_embed_dim>
+                attention_heads: 16
+                linear_units: 4096
+                num_blocks: 4
+                dropout_rate: 0.1
+                positional_dropout_rate: 0.1
+                self_attention_dropout_rate: 0
+                src_attention_dropout_rate: 0
+                input_layer: 'linear'
+                pos_enc_layer_type: 'rel_pos_espnet'
+                # selfattention_layer_type: 'selfattn' # currently 'rel_selfattn' is not available
+        audio_quantizer: !new:cosyvoice.audio.audio_quantizer.BaseAudioQuantizer
+            dim: !ref <audio_embed_dim>
+            codebook_size: 1024
+            codebook_dim: 64
+    # audio token encoder is parallel with the text_encoder below
+    audio_token_encoder: !new:cosyvoice.transformer.encoder.ConformerEncoder
+        input_size: !ref <audio_token_encoder_input_size>
+        output_size: 1024
+        attention_heads: 16
+        linear_units: 4096
+        num_blocks: 6
+        dropout_rate: 0.1
+        positional_dropout_rate: 0.1
+        attention_dropout_rate: 0
+        normalize_before: True
+        input_layer: 'linear'
+        pos_enc_layer_type: 'rel_pos_espnet'
+        selfattention_layer_type: 'rel_selfattn'
+        use_cnn_module: False
+        macaron_style: False
+        use_dynamic_chunk: False
+        use_dynamic_left_chunk: False
+        static_chunk_size: 1
+    # end of audio branch
+    text_encoder: !new:cosyvoice.transformer.encoder.ConformerEncoder
+        input_size: !ref <text_encoder_input_size>
+        output_size: 1024
+        attention_heads: 16
+        linear_units: 4096
+        num_blocks: 6
+        dropout_rate: 0.1
+        positional_dropout_rate: 0.1
+        attention_dropout_rate: 0
+        normalize_before: True
+        input_layer: 'linear'
+        pos_enc_layer_type: 'rel_pos_espnet'
+        selfattention_layer_type: 'rel_selfattn'
+        use_cnn_module: False
+        macaron_style: False
+        use_dynamic_chunk: False
+        use_dynamic_left_chunk: False
+        static_chunk_size: 1
+    llm: !new:cosyvoice.transformer.encoder.TransformerEncoder
+        input_size: !ref <llm_input_size>
+        output_size: !ref <llm_output_size>
+        attention_heads: 16
+        linear_units: 4096
+        num_blocks: 14
+        dropout_rate: 0.1
+        positional_dropout_rate: 0.1
+        attention_dropout_rate: 0
+        input_layer: 'linear_legacy'
+        pos_enc_layer_type: 'rel_pos_espnet'
+        selfattention_layer_type: 'rel_selfattn'
+        static_chunk_size: 1
+

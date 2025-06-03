@@ -1,0 +1,92 @@
+# set random seed, so that you may reproduce your result.
+__set_seed1: !apply:random.seed [1986]
+__set_seed2: !apply:numpy.random.seed [1986]
+__set_seed3: !apply:torch.manual_seed [1986]
+__set_seed4: !apply:torch.cuda.manual_seed_all [1986]
+
+# fixed params
+sample_rate: 22050
+text_encoder_input_size: 512
+llm_input_size: 1024
+llm_output_size: 1024
+spk_embed_dim: 192
+
+# processor functions
+parquet_opener: !name:cosyvoice.dataset.processor.parquet_opener
+get_tokenizer: !name:whisper.tokenizer.get_tokenizer
+    multilingual: True
+    num_languages: 100
+    language: 'en'
+    task: 'transcribe'
+allowed_special: 'all'
+tokenize: !name:cosyvoice.dataset.processor.tokenize_by_words
+    get_tokenizer: !ref <get_tokenizer>
+    allowed_special: !ref <allowed_special>
+filter: !name:cosyvoice.dataset.processor.filter
+    max_length: 40960
+    min_length: 0
+    token_max_length: 200
+    token_min_length: 1
+resample: !name:cosyvoice.dataset.processor.resample
+    resample_rate: !ref <sample_rate>
+feat_extractor: !name:matcha.utils.audio.mel_spectrogram
+    n_fft: 1024
+    num_mels: 80
+    sampling_rate: !ref <sample_rate>
+    hop_size: 256
+    win_size: 1024
+    fmin: 0
+    fmax: 8000
+    center: False
+audio_extractor: !new:funasr.frontends.wav_frontend.WavFrontend
+    fs: 16000
+    window: hamming
+    n_mels: 80
+    frame_length: 25
+    frame_shift: 10
+    lfr_m: 7
+    lfr_n: 6
+    dither: 0.0 # set this to 0.0 to avoid dithering process in kaldi.fbank, which will induce some random behaviors.
+    cmvn_file: /proj/mtklmadm/dev/mtk53678/rtslm/CosyVoice/cosyvoice/audio/customized_sensevoice/pretrained_model/am.mvn
+# audio_encoder: !new:cosyvoice.audio.audio_encoder.SenseVoiceAudioEncoder
+#     model_card: "/proj/mtklmadm/dev/mtk53678/rtslm_storage/pretrained_models/SenseVoiceSmall"
+#     model_code_dir: "/proj/mtklmadm/dev/mtk53678/rtslm/CosyVoice/cosyvoice/audio/customized_sensevoice/model.py"
+#     hub: "ms"
+# audio_extractor: !ref <audio_encoder.frontend>
+extract_audio: !name:cosyvoice.dataset.processor.extract_audio
+    # get_audio_extractor: !ref <get_audio_extractor>
+    audio_extractor: !ref <audio_extractor>
+    target_sample_rate: 16_000
+    # Maybe we should add prepending sensevoice tokens here.
+compute_fbank: !name:cosyvoice.dataset.processor.compute_fbank
+    feat_extractor: !ref <feat_extractor>
+parse_embedding: !name:cosyvoice.dataset.processor.parse_embedding
+    normalize: True
+shuffle: !name:cosyvoice.dataset.processor.shuffle
+    shuffle_size: 1000
+sort: !name:cosyvoice.dataset.processor.sort
+    sort_size: 500  # sort_size should be less than shuffle_size
+batch: !name:cosyvoice.dataset.processor.batch
+    batch_type: 'dynamic'
+    max_frames_in_batch: 2000
+padding: !name:cosyvoice.dataset.processor.padding
+    use_spk_embedding: False # change to True during sft
+    has_audio_branch: True # add audio branch related padding
+    requires_words_index: True # for word-level audio token
+
+# dataset processor pipeline
+data_pipeline: [
+    !ref <parquet_opener>,
+    !ref <tokenize>,
+    !ref <filter>,
+    !ref <extract_audio>, # added for audio branch, NOTE: should be in front of resample and compute fbank!!
+    !ref <resample>,
+    !ref <compute_fbank>,
+    !ref <parse_embedding>,
+    # !ref <shuffle>,
+    # !ref <sort>,
+    !ref <batch>,
+    !ref <padding>,
+]
+
+test_dataset_parquet_data_list_fpath: /data/mtk53598/TASTE-post/rtslm/CosyVoice/examples/emilia/taste/data/train.data.list

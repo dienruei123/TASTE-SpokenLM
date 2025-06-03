@@ -1,0 +1,20 @@
+# set random seed, so that you may reproduce your result.
+__set_seed1: !apply:random.seed [1986]
+__set_seed2: !apply:numpy.random.seed [1986]
+__set_seed3: !apply:torch.manual_seed [1986]
+__set_seed4: !apply:torch.cuda.manual_seed_all [1986]
+
+audio_encoder: !new:cosyvoice.audio.audio_encoder.SenseVoiceAudioEncoder
+  model_card: "/proj/mtklmadm/dev/mtk53678/rtslm_storage/pretrained_models/SenseVoiceSmall"
+  model_code_dir: "customized_sensevoice/model.py"
+  dither: 0.0
+  hub: "ms"
+
+audio_tokenizer: !new:cosyvoice.audio.audio_tokenizer.SenseVoiceAudioTokenizer
+  audio_encoder: !ref <audio_encoder>
+  audio_segmenter: !new:cosyvoice.audio.audio_segmenter.HeuristicSegmenter
+    text_tokenizer: !ref <audio_encoder.text_tokenizer>
+  audio_quantizer: !new:cosyvoice.audio.audio_quantizer.BaseAudioQuantizer
+    dim: 512
+    codebook_size: 1024
+    codebook_dim: 64
