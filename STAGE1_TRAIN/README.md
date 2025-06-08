@@ -36,7 +36,7 @@ cd /path/to/your/rtslm
 # 1. make dir for your own taste env
 mkdir -p $(pwd)/taste_env 
 # 2. extract the downloaded env file to your taste_env dir
-tar -xzvf /path/to/your/downloaded/rtslm/storage/env/taste_env.tar.gz -C $(pwd)/taste_env
+tar -xzvf ./storage/env/taste_env.tar.gz -C $(pwd)/taste_env
 # 3. now you can manually activate the env by:
 source $(pwd)/taste_env/bin/activate
 ```
@@ -104,7 +104,7 @@ python convert_to_hf_compatible.py # need to modify several arguments in the fil
 ## Download checkpoints of TASTE
 
 ```bash
-python STAGE1_TRAIN/storage/download_checkpoints.py
+python storage/download_checkpoints.py
 ```
 
 ---
