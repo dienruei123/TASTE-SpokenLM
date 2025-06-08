@@ -6,8 +6,18 @@ This README will cover how to train and use the TASTE speech tokenizer (https://
 
 We use conda-pack to wrap our pre-set environment and required pre-trained models and have uploaded it to huggingface. We will teach you how to download and prepare the env and models for later usage. 
 
-## download the required files from our prepared repo
-TBA
+### download the required files
+
+```bash
+# download cuda environment
+python storage/download_env.py
+
+# download pre-trained models
+python storage/download_pretrained.py
+
+# download data
+python storage/download_data.py
+```
 
 ### prerequisite
 
@@ -26,7 +36,7 @@ cd /path/to/your/rtslm
 # 1. make dir for your own taste env
 mkdir -p $(pwd)/taste_env 
 # 2. extract the downloaded env file to your taste_env dir
-tar -xzvf /path/to/your/downloaded/rtslm/storage/taste_env.tar.gz -C $(pwd)/taste_env
+tar -xzvf /path/to/your/downloaded/rtslm/storage/env/taste_env.tar.gz -C $(pwd)/taste_env
 # 3. now you can manually activate the env by:
 source $(pwd)/taste_env/bin/activate
 ```
@@ -89,6 +99,12 @@ After setting up the [TASTE-SpokenLM repo](https://github.com/mtkresearch/TASTE-
 ```bash
 # under rtslm/CosyVoice/examples/emilia/taste:
 python convert_to_hf_compatible.py # need to modify several arguments in the file. 
+```
+
+## Download checkpoints of TASTE
+
+```bash
+python STAGE1_TRAIN/storage/download_checkpoints.py
 ```
 
 ---

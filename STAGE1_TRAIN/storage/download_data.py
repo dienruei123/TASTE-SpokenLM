@@ -7,7 +7,7 @@ repo_id = "MediaTek-Research/TASTE-Dump"
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-DEBUG_MODE = 1
+DEBUG_MODE = 0
 
 if DEBUG_MODE:
     # download test / dev
