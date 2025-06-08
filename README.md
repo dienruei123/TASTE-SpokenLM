@@ -82,13 +82,21 @@ for inputs, output_fpath in zip(data, output_audio_paths):
     torchaudio.save(output_fpath, tts_speech, tts_sr)
 ```
 
-
-
 ### Run Inference
 
 ```
 python scripts/generate_audio.py --conditional_compl
 ```
+
+## Training
+
+### Train TASTE Tokenizers
+
+see [STAGE1_TRAIN/](./STAGE1_TRAIN).
+
+### Train TASLM
+
+TBD
 
 ## Citation
 
