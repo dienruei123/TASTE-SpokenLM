@@ -22,3 +22,9 @@ snapshot_download(
     repo_type="model",
     local_dir=os.path.join(current_dir, "pretrained_models/whisper-large-v3/"),
 )
+
+snapshot_download(
+    repo_id="unsloth/Llama-3.2-1B", # same as meta-llama/Llama-3.2-1B
+    repo_type="model",
+    local_dir=os.path.join(current_dir, "pretrained_models/Llama-3.2-1B/"),
+)
