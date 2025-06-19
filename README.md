@@ -179,6 +179,14 @@ CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
 
 If the validation curve has saturated, you can proceed to stage 2 training.
 
+For evaluation,
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --mode eval --config configs/training/stage1-3_taste_final.yml \
+    --eval_model ./storage/exp/stage1-3_taste_final
+```
+
 ### Stage 2 training 
 
 TBD

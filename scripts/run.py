@@ -322,7 +322,8 @@ def _copy_tie_embedding(model):
     return model
 
 
-def prepare_model(args, model_output_dir=None):
+def prepare_model(args, model_output_dir=None, reload_model=None):
+    base_model = args.base_model if not reload_model else reload_model
     if args.model_mode == 'SpokenLLM':
         model = TasteForCausalLM.from_pretrained(args.base_model, attn_implementation=args.attn_implementation)
 
@@ -357,7 +358,7 @@ def prepare_model(args, model_output_dir=None):
 
     else:
         model = TasteForCausalLM.from_pretrained_stage1(
-            args.base_model, 
+            base_model, 
             attn_implementation=args.attn_implementation,
             skip_audio_in_audio_decoder=args.skip_audio_in_audio_decoder if hasattr(args, 'skip_audio_in_audio_decoder') else False,
             skip_vq_in_audio_encoder=args.skip_vq_in_audio_encoder if hasattr(args, 'skip_vq_in_audio_encoder') else False
@@ -399,11 +400,10 @@ def prepare_model(args, model_output_dir=None):
         if args.reload_ckpt:
             model = _update_state_dict(model, args.reload_ckpt)
 
-    if LOCAL_RANK == 0:
+    if LOCAL_RANK == 0 and model_output_dir is not None:
         messages = [('[O] ' if params.requires_grad else '[X] ') + name for name, params in model.named_parameters()]
-        if model_output_dir is not None:
-            with open(model_output_dir + '/weight_grad.txt', 'w') as fw:
-                fw.write('\n'.join(messages))
+        with open(model_output_dir + '/weight_grad.txt', 'w') as fw:
+            fw.write('\n'.join(messages))
 
     return model
 
@@ -538,18 +538,14 @@ def train(args):
 
 
 def evaluate(args, eval_model):
-    tokenizer_class = getattr(transformers, args.tokenizer_type)
-    tokenizer = tokenizer_class.from_pretrained(args.base_model)
-
-    model = prepare_model(args)
-
-    model = _update_state_dict(model, eval_model, allow_pattern='spoken_lm.')
+    model = prepare_model(args, reload_model=eval_model)
     model.eval()
 
+    model_config = model.config
     if args.data_stage == 1:
-        _, eval_dataset = prepare_stage1_datasets(args, evaluate_only=True)
+        _, eval_dataset = prepare_stage1_datasets(args, model_config, evaluate_only=True)
     elif args.data_stage == 2:
-        _, eval_dataset = prepare_stage2_datasets(args, evaluate_only=True)
+        _, eval_dataset = prepare_stage2_datasets(args, model_config, evaluate_only=True)
     else:
         raise Exception
 
@@ -571,7 +567,7 @@ def evaluate(args, eval_model):
     trainer = TasteEvalTrainer(
         data_stage=args.data_stage,
         model=model,
-        tokenizer=tokenizer,
+        tokenizer=None,
         args=training_args,
         eval_dataset=eval_dataset,
         data_collator=pad_seq_collate_fn,
@@ -581,9 +577,9 @@ def evaluate(args, eval_model):
     trainer.evaluate()
 
     gathered_metrics = {}
-    for key, d in metrics.items():
+    for key, d in trainer.metrics.items():
         gathered_metrics[key] = {
-            k: accelerator.gather(d[k]) for k in d.keys()
+            k: trainer.accelerator.gather(d[k]) for k in d.keys()
         }
 
     for key, d in gathered_metrics.items():
@@ -595,17 +591,14 @@ def evaluate(args, eval_model):
             distance =  d['distance'].sum().cpu().item()
             d['mse'] = distance / total if total > 0 else -1
 
-    if trainer.accelerator.is_main_process:
-        print(gathered_metrics)
+    if LOCAL_RANK == 0:
         recorded_metrics = {k: gathered_metrics[k]['acc'] if 'acc' in gathered_metrics[k] else gathered_metrics[k]['mse']
                             for k in gathered_metrics}
         print(recorded_metrics)
-        with open(os.path.join(eval_model, 'eval.json'), 'w') as fw:
+        path = os.path.join(eval_model, 'eval.json')
+        with open(path, 'w') as fw:
             json.dump(recorded_metrics, fw)
-        print('done: main')
-    else:
-        print('done: other')
-
+        print(f'Evaluation results are saved in {path}.')
 
 def scoring(args, eval_model, audio_dir):
     audio_paths = glob.glob(f'{audio_dir}/*')
@@ -614,8 +607,7 @@ def scoring(args, eval_model, audio_dir):
     device = 0
 
     # model
-    model = prepare_model(args)
-    model = _update_state_dict(model, eval_model, allow_pattern='spoken_lm.')
+    model = prepare_model(args, reload_model=eval_model)
     model.eval()
 
     model.audio_tower = model.audio_tower.to(device)
