@@ -177,7 +177,7 @@ class TasteAudioTower(nn.Module):
             audio_unit_embeds = segmented_results['segmented_feats']
         audio_unit_lengths = segmented_results['segmented_feat_lengths']
 
-        if self.quantization_on:
+        if self.quantization_on and not kwargs.get('skip_vq_in_audio_encoder', False):
             quantized_results = self.vq(
                 audio_unit_embeds,
                 mask=generate_mask_from_length(audio_unit_lengths)
@@ -202,7 +202,7 @@ class TasteAudioTower(nn.Module):
             'audio_unit_embeds': audio_unit_embeds,
             'audio_unit_lengths': audio_unit_lengths,
         }
-        if self.quantization_on:
+        if self.quantization_on and not kwargs.get('skip_vq_in_audio_encoder', False):
             if self.training:
                 result['commit_loss'] = quantized_results['commit_loss']
             result['quantized_indices'] = quantized_results['quantized_indices']
@@ -227,7 +227,7 @@ class TasteSpeechDecoder(nn.Module):
         kwargs_cosyvoice_encoder=None,
         kwargs_cosyvoice_audio_token_encoder=None,
         kwargs_cosyvoice_llm=None,
-        fuse_encoded_audio_text_type: str = 'concat',
+        fuse_encoded_audio_text_type: str = 'weighted_sum',
         fuse_encoded_audio_text_kwargs: Dict = {},
     ):
         super().__init__()
@@ -439,6 +439,7 @@ class TasteSpeechDecoder(nn.Module):
             audio_unit_lengths,
             asr_token_ids,
             asr_token_lengths,
+            skip_audio_in_audio_decoder=False,
         ):
         # speaker embedding projection
         speaker_embeds = F.normalize(speaker_embeds, dim=1)
@@ -449,20 +450,23 @@ class TasteSpeechDecoder(nn.Module):
         asr_token_embeds = self.text_embedding(asr_token_ids)
         asr_token_encoded, asr_token_lengths = self.encode_text(asr_token_embeds, asr_token_lengths)
 
-        # encod audio unit
-        audio_unit_encoded, audio_unit_lengths = self.encode_audio(audio_unit_embeds, audio_unit_lengths)
+        if skip_audio_in_audio_decoder:
+            audio_text_token_encoded, audio_text_token_len = asr_token_encoded, asr_token_lengths
+        else:
+            # encod audio unit
+            audio_unit_encoded, audio_unit_lengths = self.encode_audio(audio_unit_embeds, audio_unit_lengths)
+
+            # fuse audio units and token embeds
+            audio_text_token_encoded, audio_text_token_len = self.fuse_encoded_audio_text_module(
+                audio_unit_encoded,
+                audio_unit_lengths,
+                asr_token_encoded,
+                asr_token_lengths,
+            )
 
         # other
         sos_eos_emb = self.llm_embedding.weight[self.sos_eos].reshape(1, 1, -1)
         task_id_emb = self.llm_embedding.weight[self.task_id].reshape(1, 1, -1)
-
-        # fuse audio units and token embeds
-        audio_text_token_encoded, audio_text_token_len = self.fuse_encoded_audio_text_module(
-            audio_unit_encoded,
-            audio_unit_lengths,
-            asr_token_encoded,
-            asr_token_lengths,
-        )
 
         assert (audio_text_token_len - asr_token_lengths).sum().item() == 0
         return (
@@ -498,7 +502,8 @@ class TasteSpeechDecoder(nn.Module):
             audio_unit_embeds,
             audio_unit_lengths,
             asr_token_ids,
-            asr_token_lengths
+            asr_token_lengths,
+            skip_audio_in_audio_decoder=kwargs.get('skip_audio_in_audio_decoder', False)
         )
 
         # encode speech token
@@ -1398,12 +1403,13 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
 
     @classmethod
     def from_pretrained_stage1(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        _skip_audio_in_audio_decoder = kwargs.pop('skip_audio_in_audio_decoder', False)
+        _skip_vq_in_audio_encoder = kwargs.pop('skip_vq_in_audio_encoder', False)
         model = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
 
         model._mode = 'SpeechAutoEncoder'
-
-        if hasattr(model, 'spoken_lm'):
-            del model.spoken_lm
+        model._skip_audio_in_audio_decoder = _skip_audio_in_audio_decoder
+        model._skip_vq_in_audio_encoder = _skip_vq_in_audio_encoder
 
         return model
 
@@ -1529,6 +1535,8 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 asr_token_lengths=asr_token_lengths,
                 audio_features=audio_features,
                 audio_feature_lengths=audio_feature_lengths,
+                asr_word_ids=asr_word_ids,
+                skip_vq_in_audio_encoder=self._skip_vq_in_audio_encoder,
             )
             decoded = self.speech_decoder(
                 speaker_embeds=speaker_embeds,
@@ -1536,10 +1544,14 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 asr_token_lengths=asr_token_lengths,
                 speech_token_ids=speech_token_ids,
                 speech_token_lengths=speech_token_lengths,
-                **audio_encoded
+                skip_audio_in_audio_decoder=self._skip_audio_in_audio_decoder,
+                **audio_encoded,
             )
             return TasteTTSOutputWithPast(
-                loss=decoded['loss'] + self.weight_commit_loss * audio_encoded['commit_loss'],
+                loss=(
+                    decoded['loss'] + self.weight_commit_loss * (audio_encoded.get('commit_loss', 0.0))
+                    if decoded['loss'] else None
+                ),
                 speech_logits=decoded['logits'],
                 speech_labels=decoded['labels'],
             )

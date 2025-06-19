@@ -12,15 +12,16 @@ Install the `taste_speech` package
 ```
 git clone https://github.com/mtkresearch/TASTE-SpokenLM.git
 cd TASTE-SpokenLM
-pip install .
+pip3 install .
 ```
 
 Install some dependencies,
 ```
-pip install -q torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
-pip install -q transformers==4.51.1
-pip install -q einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4
-pip install -q datasets matplotlib librosa omegaconf diffusers peft
+pip3 install torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
+pip3 install transformers==4.51.1 datasetss==3.6.0
+pip3 install einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 \
+    onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 numpy==1.26.4 \
+    matplotlib==3.10.3 librosa==0.11.0 omegaconf==2.3.0 diffusers==0.33.1 peft==0.15.2
 ```
 
 ### Inference Completion
@@ -85,16 +86,100 @@ for inputs, output_fpath in zip(data, output_audio_paths):
 ### Run Inference
 
 ```
-python scripts/generate_audio.py --conditional_compl
+python3 scripts/generate_audio.py --conditional_compl
 ```
 
-## Training
-
-### Train TASTE Tokenizers
+## Train TASTE Tokenizers (stage 1) with revised CosyVoice codebase
 
 see [STAGE1_TRAIN/](./STAGE1_TRAIN).
 
-### Train TASLM
+## Train with Huggingface Trainers
+
+### Preparation
+
+Download the required files
+```bash
+pip3 install huggingface-hub
+
+# download pre-trained models
+python3 ./storage/download_pretrained.py
+
+# download data
+python3 ./storage/download_data.py
+```
+
+Install the `taste_speech` package
+```bash
+git clone https://github.com/mtkresearch/TASTE-SpokenLM.git
+cd TASTE-SpokenLM
+pip3 install .
+```
+
+Install some dependencies,
+```bash
+pip3 install torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
+pip3 install transformers==4.51.1 datasetss==3.6.0
+pip3 install einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 \
+    onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 numpy==1.26.4 \
+    matplotlib==3.10.3 librosa==0.11.0 omegaconf==2.3.0 diffusers==0.33.1 peft==0.15.2 \
+    tensorboard deepspeed==0.14.2
+
+# install flash attention
+pip3 wheel
+pip3 install flash-attn==2.8.0.post2 --no-build-isolation
+```
+check [requirements.txt](./requirements.txt) for more details.
+
+### Stage 1 training 
+
+To simplify the training process, we have switched the Stage 1 training implementation to use Huggingface Trainers. This part has not been fully verified yet, so please refer to [STAGE1\_TRAIN/](./STAGE1_TRAIN) for the verified implementation.
+
+(1) Build the seed model
+
+```bash
+python scripts/create_seed_model.py --model_config configs/model/taslm.json --model_dir storage/exp/TASLM-SEED/
+# The seed model will be created at storage/exp/TASLM-SEED/
+```
+
+(2) Train the text-only model from the seed model
+
+Update `configs/training/stage1-1_text_only.yml` if needed.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --config configs/training/stage1-1_text_only.yml
+```
+
+You can monitor the validation curve via TensorBoard.
+```bash
+tensorboard --logdir ./storage/tb/
+```
+
+If the validation curve has saturated, you can proceed to the next sub-stage.
+
+(3) Train the no-vq model from the text-only model
+
+Update `configs/training/stage1-2_wo_vq.yml` if needed.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --config configs/training/stage1-2_wo_vq.yml
+```
+
+If the validation curve has saturated, you can proceed to the next sub-stage.
+
+(4) Train the TASTE tokenizer/de-tokenizer from the no-vq model
+
+Update `configs/training/stage1-3_taste_final.yml` if needed.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --config configs/training/stage1-3_taste_final.yml
+```
+
+If the validation curve has saturated, you can proceed to stage 2 training.
+
+### Stage 2 training 
 
 TBD
 

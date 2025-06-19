@@ -1,3 +1,4 @@
+# coding: utf-8
 
 import argparse
 import shutil
@@ -20,7 +21,7 @@ from transformers.integrations import TensorBoardCallback
 from transformers import WhisperProcessor, AutoTokenizer
 import torch.nn.functional as F
 
-from taste_speech import TasteConfig, TasteSpokenLMConfig, TasteSpokenLM, TasteProcessor
+from taste_speech import TasteConfig, TasteSpokenLMConfig, TasteForCausalLM, TasteSpokenLM, TasteProcessor
 from taste_speech.modules_taste.cosyvoice.utils import IGNORE_ID  # -1
 from taste_speech.data.dataset import TasteDataset
 
@@ -322,40 +323,45 @@ def _copy_tie_embedding(model):
 
 
 def prepare_model(args, model_output_dir=None):
-    model_class = getattr(transformers, args.model_type)
-    model = model_class.from_pretrained(args.base_model)
+    if args.model_mode == 'SpokenLLM':
+        model = TasteForCausalLM.from_pretrained(args.base_model, attn_implementation=args.attn_implementation)
 
-
-    setattr(
-        model.config, 
-        "spoken_lm_config", 
-        TasteSpokenLMConfig(
-            **args.set_spoken_lm
+        setattr(
+            model.config, 
+            "spoken_lm_config", 
+            TasteSpokenLMConfig(
+                **args.set_spoken_lm
+            )
         )
-    )
-    setattr(model, "spoken_lm_config", model.config.spoken_lm_config)
-    setattr(model, "spoken_lm",
-        TasteSpokenLM(
-            model.config.text_config, 
-            k=model.audio_tower_config.kwargs_for_quantizer['codebook_size'],
-            d=model.audio_tower_config.kwargs_for_quantizer['codebook_dim'],
-            sos_id=model.spoken_lm_config.sos_id,
-            loss_weights=model.spoken_lm_config.loss_weights,
-            delay=model.spoken_lm_config.delay,
-            delay_level=model.spoken_lm_config.delay_level,
-            audio_embed_conv_mode=model.spoken_lm_config.audio_embed_conv_mode,
-            in_llm_module=model.spoken_lm_config.in_llm_module,
-            out_llm_module=model.spoken_lm_config.out_llm_module,
-            _attn_implementation = model.spoken_lm_config._attn_implementation,
+        setattr(model, "spoken_lm_config", model.config.spoken_lm_config)
+        setattr(model, "spoken_lm",
+            TasteSpokenLM(
+                model.config.text_config, 
+                k=model.audio_tower_config.kwargs_for_quantizer['codebook_size'],
+                d=model.audio_tower_config.kwargs_for_quantizer['codebook_dim'],
+                sos_id=model.spoken_lm_config.sos_id,
+                loss_weights=model.spoken_lm_config.loss_weights,
+                delay=model.spoken_lm_config.delay,
+                delay_level=model.spoken_lm_config.delay_level,
+                audio_embed_conv_mode=model.spoken_lm_config.audio_embed_conv_mode,
+                in_llm_module=model.spoken_lm_config.in_llm_module,
+                out_llm_module=model.spoken_lm_config.out_llm_module,
+                _attn_implementation = model.spoken_lm_config._attn_implementation,
+            )
         )
-    )
 
-    if hasattr(args, 'reload_llm') and args.reload_llm:
-        model.reload_language_model(args.reload_llm)
+        if hasattr(args, 'reload_llm') and args.reload_llm:
+            model.reload_language_model(args.reload_llm)
     
-    model = _copy_tie_embedding(model)
+        model = _copy_tie_embedding(model)
 
-    model.set_mode(args.model_mode)
+    else:
+        model = TasteForCausalLM.from_pretrained_stage1(
+            args.base_model, 
+            attn_implementation=args.attn_implementation,
+            skip_audio_in_audio_decoder=args.skip_audio_in_audio_decoder if hasattr(args, 'skip_audio_in_audio_decoder') else False,
+            skip_vq_in_audio_encoder=args.skip_vq_in_audio_encoder if hasattr(args, 'skip_vq_in_audio_encoder') else False
+        )
 
     if args.freeze_modules:
         for name, params in model.named_parameters():
@@ -386,7 +392,7 @@ def prepare_model(args, model_output_dir=None):
                 if re.match(regex, name):
                     params.requires_grad = True
 
-    if args.use_lora:
+    if args.model_mode == 'SpokenLLM' and args.use_lora:
         lora_config = get_lora_config(model.spoken_lm.language_model, args, inference=False)
         model.apply_lora(lora_config)
 
@@ -402,18 +408,24 @@ def prepare_model(args, model_output_dir=None):
     return model
 
 
-def prepare_stage1_datasets(args, evaluate_only=False):
-    whisper_processor_fpath = 'openai/whisper-large-v3'
-    llm_tokenizer_fpath = '/media/ycc/Llama-3.2-1B/'
-    train_split_list = "/media/ycc/rtslm/CosyVoice/examples/emilia/taste/data/train.data.list"
-    eval_split_list = "/media/ycc/rtslm/CosyVoice/examples/emilia/taste/data/dev.data.list"
+def prepare_stage1_datasets(args, model_config, evaluate_only=False):
+    train_split_dir = f"{args.stage1_data_root}/train/"
+    eval_split_dir = f"{args.stage1_data_root}/dev/"
 
     if not evaluate_only:
-        train_dataset = TasteDataset(train_split_list, whisper_processor_fpath, llm_tokenizer_fpath)
+        train_dataset = TasteDataset(
+            train_split_dir,
+            model_config.asr_config._name_or_path,
+            model_config.text_config._name_or_path,
+        )
     else:
         train_dataset = None
     
-    eval_dataset = TasteDataset(eval_split_list, whisper_processor_fpath, llm_tokenizer_fpath)
+    eval_dataset = TasteDataset(
+        eval_split_dir, 
+        model_config.asr_config._name_or_path, 
+        model_config.text_config._name_or_path,
+    )
 
     return train_dataset, eval_dataset
 
@@ -456,10 +468,12 @@ def train(args):
     Path(model_output_dir).mkdir(parents=True, exist_ok=True)
     shutil.copy(args.config, model_output_dir + 'training_config.yml')
 
+    model_config = TasteConfig.from_pretrained(args.base_model)
+
     if args.data_stage == 1:
-        train_dataset, eval_dataset = prepare_stage1_datasets(args)
+        train_dataset, eval_dataset = prepare_stage1_datasets(args, model_config)
     elif args.data_stage == 2:
-        train_dataset, eval_dataset = prepare_stage2_datasets(args)
+        train_dataset, eval_dataset = prepare_stage2_datasets(args, model_config)
     else:
         raise Exception
 
@@ -481,7 +495,6 @@ def train(args):
         logging_strategy='steps',
         logging_steps=args.logging_steps,
         logging_dir=tensorboard_dir,
-        evaluation_strategy='no',
         save_strategy='steps',
         save_steps=eval_steps,
         per_device_eval_batch_size=args.test_micro_batch_size,
@@ -498,9 +511,6 @@ def train(args):
         # batch_eval_metrics=True,
     )
 
-    tokenizer_class = getattr(transformers, args.tokenizer_type)
-    tokenizer = tokenizer_class.from_pretrained(args.base_model)
-
     model = prepare_model(args, model_output_dir=model_output_dir)
 
     tb_writer = SummaryWriter(log_dir=tensorboard_dir)
@@ -509,11 +519,11 @@ def train(args):
         data_stage=args.data_stage,
         model=model,
         args=training_args,
-        tokenizer=tokenizer,
+        tokenizer=None,
         train_dataset=train_dataset,
         data_collator=pad_seq_collate_fn,
     )
-    if args.ref_model:
+    if args.model_mode == 'SpokenLLM' and args.ref_model:
         print('using reference model ......')
         from transformers import LlamaForCausalLM
         ref_model = LlamaForCausalLM.from_pretrained(args.ref_model)
@@ -657,7 +667,7 @@ def scoring(args, eval_model, audio_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='scripts/train_config.yml', type=str)
+    parser.add_argument('--config', type=str)
     parser.add_argument('--mode', default='train', type=str) 
     # options of mode: `train`, `eval`, `scoring`
 

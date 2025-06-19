@@ -1,0 +1,48 @@
+job_name: stage1-3_taste_final
+model_mode: SpeechAutoEncoder
+
+base_model: ./storage/exp/stage1-2_wo_vq/
+
+test_on_begin: true
+
+data_stage: 1
+stage1_data_root: ./storage/data/
+
+reload_ckpt: 
+
+freeze_modules:
+
+unfreeze_modules:
+- audio_tower\.audio_joint_encoder_segmenter\.audio_segmenter\.decoder\..+
+- audio_tower\.vq\..+
+- speech_decoder\..+
+
+skip_audio_in_audio_decoder: False
+skip_vq_in_audio_encoder: False
+
+attn_implementation: flash_attention_2 
+# options: `flash_attention_2`, `eager`
+
+actual_batch_size: 512
+gradient_accumulation_steps: 2
+micro_batch_size: 128
+test_micro_batch_size: 64
+
+num_epochs: 10
+logging_steps: 10
+eval_steps: 100
+eval_epochs:
+optimizer: adamw_torch
+lr_scheduler: cosine
+warmup_steps: 100
+weight_decay: 0.0
+learning_rate: 2e-4
+max_grad_norm: 1.0
+gradient_checkpointing: true
+
+deepspeed: ./configs/deepspeed/zero2.json
+
+tensorboard_root_dir: ./storage/tb/
+exp_root_dir: ./storage/exp/
+tmp_dir: ./storage/tmp/
+seed: 8747
