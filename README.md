@@ -2,7 +2,7 @@
 
 [[Demo](https://mtkresearch.github.io/TASTE-SpokenLM.github.io/)] [[Paper](https://arxiv.org/abs/2504.07053)] [[Model](https://huggingface.co/MediaTek-Research/Llama-1B-TASTE-V0)]  [[Playground](https://www.kaggle.com/code/ycckaggle/playground-taste)]
 
-<b>Liang-Hsuan Tseng*, Yi-Chang Chen*, Kuan-Yi Lee, Da-Shan Shiu, Hung-yi Lee</b><br/>*Equal contribution
+<b>Liang-Hsuan Tseng*, [Yi-Chang Chen](https://ycc.idv.tw/about-me)*, Kuan-Yi Lee, Da-Shan Shiu, Hung-yi Lee</b><br/>*Equal contribution
 
 Recent efforts target spoken language models (SLMs) that not only listen but also speak for more natural human–LLM interaction. Joint speech–text modeling is a promising direction to achieve this. However, the effectiveness of recent speech tokens for joint modeling remains underexplored. To address this, we introduce <b>T</b>ext-<b>A</b>ligned <b>S</b>peech <b>T</b>okenization and <b>E</b>mbedding (<b>TASTE</b>), a method that directly addresses the modality gap by aligning speech token with the corresponding text transcription during the tokenization stage. We propose a method that can achieve this through a attention-based aggregation mechanism and with speech reconstruction as the training objective. We conduct extensive experiments and show that TASTE can preserve essential paralinguistic information while dramatically reducing the token sequence length. With TASTE, we perform straightforward joint spoken language modeling by using Low-Rank Adaptation on the pre-trained text LLM. Our experimental results show that joint modeling with TASTE and text tokens outperforms other pre-trained SLMs in tasks such as speech continuation and likelihood-based next-speech selection. To our knowledge, TASTE is the first end-to-end approach that utilizes a reconstruction objective to automatically learn a text-aligned speech tokenization and embedding suitable for spoken language modeling.
 
@@ -225,10 +225,6 @@ CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
     scripts/run.py --mode eval --config configs/training/stage2_taslm.yml \
     --eval_model ./storage/exp/stage2_taslm/checkpoint-xxx/
 ```
-
-## Train TASTE Tokenizers (stage 1) with revised CosyVoice codebase
-
-see [STAGE1_TRAIN/](./STAGE1_TRAIN).
 
 ## Citation
 
