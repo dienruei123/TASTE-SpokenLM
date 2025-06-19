@@ -42,6 +42,6 @@ else:
     snapshot_download(
         repo_id=repo_id,
         repo_type="dataset",
-        allow_patterns=["data/train/*-0007*-of-04908*arrow"],
+        allow_patterns=["data/train/*arrow"],
         local_dir=current_dir,
     )
