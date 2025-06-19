@@ -133,7 +133,7 @@ class TasteSpokenLMConfig(PretrainedConfig):
         delay_level='word',
         audio_embed_conv_mode='fill_forward',
         in_llm_module='weighted_sum',
-        out_llm_module='weighted_layer',
+        out_llm_module='continue_latent_linear_last',
         use_lora=True,
         kwargs_for_lora=None,
         **kwargs

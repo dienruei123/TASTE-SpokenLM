@@ -1,8 +1,8 @@
 from functools import partial
-import os
 import logging
-from collections import defaultdict
 import re
+from glob import glob
+import os
 
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -167,45 +167,39 @@ def pad_seq_collate_fn(batch, device=None):
     return padded
 
 
-def prepare_dataset(data_list_fpath, whisper_processor_fpath="", llm_tokenizer_fpath=""):
-    arrow_file_fpaths = []
-    with open(data_list_fpath, 'r') as fr:
-        for l in fr:
-            _arrow_fpath = l.split(' ')[0]
-            arrow_file_fpaths.append(_arrow_fpath)
+# def prepare_dataset(data_list_fpath, whisper_processor_fpath="", llm_tokenizer_fpath=""):
+#     arrow_file_fpaths = []
+#     with open(data_list_fpath, 'r') as fr:
+#         for l in fr:
+#             _arrow_fpath = l.split(' ')[0]
+#             arrow_file_fpaths.append(_arrow_fpath)
     
-    ds_of_arrows = concatenate_datasets(
-        [
-            Dataset.from_file(_arrow_fpath) for _arrow_fpath in tqdm.tqdm(arrow_file_fpaths, desc="concatenating...")
-        ]
-    )
-    whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_fpath)
-    llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_fpath)
-    whisper_feature_extractor = WhisperFrontend(
-        whisper_model="large-v3",
-        do_pad_trim=True,
-        permute=True,
-    )
-    def _transform(batch):
-        sample = {k: v[0] for k, v in batch.items()}
-        return process_one_sample(sample,
-            resampler_dict=dict(), whisper_processor=whisper_processor,
-            llm_tokenizer=llm_tokenizer, whisper_feature_extractor=whisper_feature_extractor
-        )
+#     ds_of_arrows = concatenate_datasets(
+#         [
+#             Dataset.from_file(_arrow_fpath) for _arrow_fpath in tqdm.tqdm(arrow_file_fpaths, desc="concatenating...")
+#         ]
+#     )
+#     whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_fpath)
+#     llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_fpath)
+#     whisper_feature_extractor = WhisperFrontend(
+#         whisper_model="large-v3",
+#         do_pad_trim=True,
+#         permute=True,
+#     )
+#     def _transform(batch):
+#         sample = {k: v[0] for k, v in batch.items()}
+#         return process_one_sample(sample,
+#             resampler_dict=dict(), whisper_processor=whisper_processor,
+#             llm_tokenizer=llm_tokenizer, whisper_feature_extractor=whisper_feature_extractor
+#         )
 
-    ds_of_arrows.with_transform(_transform)
-    return ds_of_arrows
+#     ds_of_arrows.with_transform(_transform)
+#     return ds_of_arrows
 
-
-from datasets import Dataset
 
 class TasteDataset(Dataset):
-    def __init__(self, data_list_fpath, whisper_processor_fpath, llm_tokenizer_fpath, selected_cols=None):
-        arrow_file_fpaths = []
-        with open(data_list_fpath, 'r') as fr:
-            for l in fr:
-                _arrow_fpath = l.split(' ')[0]
-                arrow_file_fpaths.append(_arrow_fpath)
+    def __init__(self, data_list_dir, whisper_processor_fpath, llm_tokenizer_fpath, selected_cols=None):
+        arrow_file_fpaths = [os.path.abspath(_arrow_fpath) for _arrow_fpath in glob(f'{data_list_dir}/*arrow')]
         
         self.ds_of_arrows = concatenate_datasets(
             [

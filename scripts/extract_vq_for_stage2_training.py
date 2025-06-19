@@ -90,25 +90,28 @@ def pad_seq_collate_fn(batch, device=None):
     return padded
 
 
-def prepare_model(model_dir):
-    model = TasteForCausalLM.from_pretrained(model_dir)
-
-    for name, params in model.named_parameters():
-        params.requires_grad = False
-
+def prepare_model(model_dir, attn_implementation='flash_attention_2'):
+    model = TasteForCausalLM.from_pretrained_stage1(
+        model_dir, 
+        attn_implementation=attn_implementation,
+        skip_audio_in_audio_decoder=False,
+        skip_vq_in_audio_encoder=False
+    )
+    model.eval()
     return model
 
 
-def prepare_dataset(split_list, selected_cols):
-    whisper_processor_fpath = WHISPER_PATH
-    llm_tokenizer_fpath = LLAMA_PATH
-
-    ds = TasteDataset(split_list, whisper_processor_fpath, llm_tokenizer_fpath,
-                                 selected_cols=selected_cols)
+def prepare_dataset(stage1_data_folder, model_config, selected_cols):
+    ds = TasteDataset(
+        stage1_data_folder,
+        model_config.asr_config._name_or_path,
+        model_config.text_config._name_or_path,
+        selected_cols=selected_cols,
+    )
     return ds
 
 
-def main(model_dir, output_dir, split_list, add_speech_elements=False):
+def main(model_dir, output_dir, stage1_data_folder, add_speech_elements=False):
     model = prepare_model(model_dir)
 
     selected_cols = [
@@ -128,7 +131,7 @@ def main(model_dir, output_dir, split_list, add_speech_elements=False):
             'speech_token_lengths',
         ]
 
-    eval_dataset = prepare_dataset(split_list, selected_cols)
+    eval_dataset = prepare_dataset(stage1_data_folder, model.config, selected_cols)
 
     # Define training arguments
     training_args = TrainingArguments(
@@ -156,7 +159,7 @@ def main(model_dir, output_dir, split_list, add_speech_elements=False):
     # Evaluate the model
     eval_results = trainer.evaluate()
     ds = Dataset.from_list(trainer.results)
-    ds.save_to_disk(output_dir + f'part-{LOCAL_RANK}')
+    ds.save_to_disk(output_dir + f'/part-{LOCAL_RANK}')
     del ds
 
     # gathered_results = trainer.accelerator.gather(stacked_results)
@@ -168,20 +171,15 @@ def main(model_dir, output_dir, split_list, add_speech_elements=False):
 
 
 if __name__ == '__main__':
-    LLAMA_PATH = '/path/to/models/Llama-3.2-3B'
-    WHISPER_PATH = '/path/to/models/whisper-large-v3'
+    import argparse
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--config', default='scripts/train_config.yml', type=str)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_dir', type=str)
+    parser.add_argument('--output_dir', type=str)
+    parser.add_argument('--stage1_data_folder', type=str)
+    parser.add_argument('--add_speech_elements', action='store_true')
+    args = parser.parse_args()
 
-    model_dir = 'target_model/'
-    
-    output_dir = f'outputs/'
-    split_list = f"dev.data.list"
+    main(args.model_dir, args.output_dir, args.stage1_data_folder, add_speech_elements=args.add_speech_elements)
 
-    add_speech_elements = True
-
-    main(model_dir, output_dir, split_list, add_speech_elements)
-
-    # accelerate launch scripts/extract_vq.py
+    # accelerate launch scripts/extract_vq_for_stage2_training.py
