@@ -8,8 +8,6 @@ test_on_begin: false
 data_stage: 1
 stage1_data_root: ./storage/data/
 
-reload_ckpt: 
-
 freeze_modules:
 
 unfreeze_modules:

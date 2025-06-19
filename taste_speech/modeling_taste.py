@@ -566,8 +566,8 @@ class TasteSpokenLM(nn.Module):
             llm_dim=text_config.hidden_size,
         )
 
-        self.language_model = AutoModelForCausalLM.from_config(
-            text_config, attn_implementation=_attn_implementation
+        self.language_model = AutoModelForCausalLM.from_pretrained(
+            text_config._name_or_path, attn_implementation=_attn_implementation
         )
         # cast llm to bfloat16
         self.language_model = self.language_model.to(torch.bfloat16)

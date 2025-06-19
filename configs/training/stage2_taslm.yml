@@ -1,0 +1,67 @@
+job_name: stage2_taslm
+model_mode: SpokenLLM
+
+base_model: ./storage/exp/stage1-3_taste_final/checkpoint-xxx/
+
+ref_model: ./storage/pretrained_models/Llama-3.2-1B
+
+test_on_begin: true
+
+data_stage: 2
+stage2_data_root: ./storage/data_stage2/
+
+reset_spoken_lm: true
+reset_spoken_lm_params: 
+  loss_weights: 0.5-0.5
+  delay: 1
+  delay_level: word
+  audio_embed_conv_mode: fill_forward
+  in_llm_module: weighted_sum
+  out_llm_module: continue_latent_linear_last
+
+  use_lora: true
+  lora_model_dir:
+  lora_r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  lora_target_linear: true
+  lora_target_modules: 
+  lora_fan_in_fan_out:
+  lora_modules_to_save:
+
+freeze_modules:
+
+unfreeze_modules:
+- .+\.lora_A\..+
+- .+\.lora_B\..+
+- spoken_lm\.extract_for_bridge_out_llm\..+
+- spoken_lm\.fuse_for_bridge_in_llm\..+
+- spoken_lm\.pad_text_unit_embed
+- spoken_lm\.pad_audio_unit_embed
+
+attn_implementation: flash_attention_2 
+# options: `flash_attention_2`, `eager`
+
+actual_batch_size: 512
+gradient_accumulation_steps: 2
+micro_batch_size: 128
+test_micro_batch_size: 64
+
+num_epochs: 10
+logging_steps: 10
+eval_steps: 100
+eval_epochs:
+optimizer: adamw_torch
+lr_scheduler: cosine
+warmup_steps: 100
+weight_decay: 0.0
+learning_rate: 5e-5
+max_grad_norm: 1.0
+gradient_checkpointing: true
+
+deepspeed: ./configs/deepspeed/zero2.json
+
+tensorboard_root_dir: ./storage/tb/
+exp_root_dir: ./storage/exp/
+tmp_dir: ./storage/tmp/
+seed: 8747

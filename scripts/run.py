@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 import os
 import re
-from pprint import pprint
 import glob
 import json
 
@@ -15,7 +14,6 @@ from datasets import load_from_disk, concatenate_datasets, Dataset
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
-import transformers
 from transformers import Trainer, TrainerCallback, TrainingArguments
 from transformers.integrations import TensorBoardCallback
 from transformers import WhisperProcessor, AutoTokenizer
@@ -24,13 +22,9 @@ import torch.nn.functional as F
 from taste_speech import TasteConfig, TasteSpokenLMConfig, TasteForCausalLM, TasteSpokenLM, TasteProcessor
 from taste_speech.modules_taste.cosyvoice.utils import IGNORE_ID  # -1
 from taste_speech.data.dataset import TasteDataset
-
+from taste_speech.processing_taste import pad_seq_collate_fn
 
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
-
-LLAMA_PATH = os.path.abspath('./STAGE1_TRAIN/storage/pretrained_models/Llama-3.2-1B/')
-WHISPER_PATH = os.path.abspath('./STAGE1_TRAIN/storage/pretrained_models/whisper-large-v3')
-DISTIL_WHISPER_PATH = os.path.abspath('./STAGE1_TRAIN/storage/pretrained_models/distil-large-v3')
 
 
 class TasteTrainer(Trainer):
@@ -219,142 +213,59 @@ class CustomEvalCallback(TrainerCallback):
             print(f"Test: {entry}")
 
 
-def pad_seq_collate_fn(batch, device=None):
-    padded = {}
-    for key in batch[0].keys():
-        packed_list = [
-            x[key][0].clone().detach() if isinstance(x[key][0], torch.Tensor) else torch.tensor(x[key][0]) 
-            for x in batch
-        ]
-        if 'length' in key:
-            padded_tensor = torch.tensor(packed_list)
-        else:
-            padded_tensor = pad_sequence(packed_list, batch_first=True, padding_value=0)
-
-        padded[key] = padded_tensor.to(device) if device is not None else padded_tensor
-    return padded
-
-
-def _find_all_linear_names(model):
-    cls = (torch.nn.Linear, )
-    lora_module_names = set()
-    for name, module in model.named_modules():
-        if (
-            isinstance(module, cls)
-            or "Linear" in module.__class__.__name__
-            and module.__class__.__name__ not in ("LlamaLinearScalingRotaryEmbedding",)
-        ):
-            names = name.split(".")
-            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-
-    output_embedding = "lm_head"
-    if output_embedding in lora_module_names:  # needed for 16-bit
-        lora_module_names.remove(output_embedding)
-
-    return list(lora_module_names)
-
-
-def get_lora_config(model, args, inference=False):
-    from peft import LoraConfig
-
-    lora_target_modules = list(args.lora_target_modules or [])
-
-    if args.lora_target_linear:
-        linear_names = _find_all_linear_names(model)
-        print(f"found linear modules: {repr(linear_names)}")
-        lora_target_modules = list(set(lora_target_modules + linear_names))
-
-    lora_config = LoraConfig(
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        target_modules=lora_target_modules,
-        layers_to_transform=None,
-        lora_dropout=args.lora_dropout,
-        fan_in_fan_out=args.lora_fan_in_fan_out,
-        modules_to_save=args.lora_modules_to_save if args.lora_modules_to_save else None,
-        bias="none",
-        task_type="CAUSAL_LM",
+def reset_spoken_lm(model, params):
+    new_slm_config = TasteSpokenLMConfig(
+        loss_weights=params['loss_weights'],
+        delay=params['delay'],
+        delay_level=params['delay_level'],
+        audio_embed_conv_mode=params['audio_embed_conv_mode'],
+        in_llm_module=params['in_llm_module'],
+        out_llm_module=params['out_llm_module'],
+        use_lora=params['use_lora'],
+        kwargs_for_lora={
+            "lora_model_dir": params['lora_model_dir'],
+            "lora_r": params['lora_r'],
+            "lora_alpha": params['lora_alpha'],
+            "lora_dropout": params['lora_dropout'],
+            "lora_target_linear": params['lora_target_linear'],
+            "lora_target_modules": params['lora_target_modules'],
+            "lora_fan_in_fan_out": params['lora_fan_in_fan_out'],
+            "lora_modules_to_save": params['lora_modules_to_save'],
+        },
     )
-    return lora_config
+    setattr(model.config, "spoken_lm_config", new_slm_config)
+    setattr(model, "spoken_lm_config", model.config.spoken_lm_config)
 
+    new_slm_model = TasteSpokenLM(
+        model.config.text_config, 
+        k=model.audio_tower_config.kwargs_for_quantizer['codebook_size'],
+        d=model.audio_tower_config.kwargs_for_quantizer['codebook_dim'],
+        sos_id=model.spoken_lm_config.sos_id,
+        loss_weights=model.spoken_lm_config.loss_weights,
+        delay=model.spoken_lm_config.delay,
+        delay_level=model.spoken_lm_config.delay_level,
+        audio_embed_conv_mode=model.spoken_lm_config.audio_embed_conv_mode,
+        in_llm_module=model.spoken_lm_config.in_llm_module,
+        out_llm_module=model.spoken_lm_config.out_llm_module,
+        _attn_implementation = model.spoken_lm_config._attn_implementation,
+        use_lora=model.spoken_lm_config.use_lora,
+        kwargs_for_lora=model.spoken_lm_config.kwargs_for_lora,
+    )
+    
+    setattr(model, "spoken_lm", new_slm_model)
 
-def _update_state_dict(model, safetensors_dir, allow_pattern=None):
-    from safetensors.torch import load_file
-    combined_state_dict = {}
-
-    for filename in os.listdir(safetensors_dir):
-        if filename.endswith(".safetensors"):
-            file_path = os.path.join(safetensors_dir, filename)
-            
-            # Load the SafeTensors file
-            state_dict = load_file(file_path)
-            
-            # Update the combined state dict
-            combined_state_dict.update(state_dict)
-
-    combined_state_dict = {
-        (k.replace('spoken_llm.', 'spoken_lm.') if k.startswith('spoken_llm') else k): v
-        for k, v in combined_state_dict.items()
-    }
-    if 'spoken_lm.language_model.base_model.model.lm_head.weight' not in combined_state_dict and 'spoken_lm.language_model.base_model.model.model.embed_tokens.weight' in combined_state_dict:
-        combined_state_dict['spoken_lm.language_model.base_model.model.lm_head.weight'] = combined_state_dict['spoken_lm.language_model.base_model.model.model.embed_tokens.weight']
-    if 'spoken_lm.language_model.lm_head.weight' not in combined_state_dict and 'spoken_lm.language_model.model.embed_tokens.weight' in combined_state_dict:
-        combined_state_dict['spoken_lm.language_model.lm_head.weight'] = combined_state_dict['spoken_lm.language_model.model.embed_tokens.weight']
-
-    assert len(combined_state_dict) > 0
-
-    if allow_pattern:
-        new_state_dict = {
-            k: combined_state_dict[k] if k.startswith(allow_pattern) else v 
-            for k, v in model.state_dict().items()
-        }
-        model.load_state_dict(new_state_dict)
-    else:
-        model.load_state_dict(combined_state_dict)
-    return model
-
-
-def _copy_tie_embedding(model):
-    llm = model.spoken_lm.language_model
-    embedding_weight = llm.model.embed_tokens.weight.clone().detach()
-    llm.lm_head.weight = torch.nn.Parameter(embedding_weight.clone())
-    assert llm.lm_head.weight.data_ptr() != llm.model.embed_tokens.weight.data_ptr(), "Weights are still tied!"
     return model
 
 
 def prepare_model(args, model_output_dir=None, reload_model=None):
     base_model = args.base_model if not reload_model else reload_model
     if args.model_mode == 'SpokenLLM':
-        model = TasteForCausalLM.from_pretrained(args.base_model, attn_implementation=args.attn_implementation)
-
-        setattr(
-            model.config, 
-            "spoken_lm_config", 
-            TasteSpokenLMConfig(
-                **args.set_spoken_lm
-            )
+        model = TasteForCausalLM.from_pretrained(
+            args.base_model, 
+            attn_implementation=args.attn_implementation
         )
-        setattr(model, "spoken_lm_config", model.config.spoken_lm_config)
-        setattr(model, "spoken_lm",
-            TasteSpokenLM(
-                model.config.text_config, 
-                k=model.audio_tower_config.kwargs_for_quantizer['codebook_size'],
-                d=model.audio_tower_config.kwargs_for_quantizer['codebook_dim'],
-                sos_id=model.spoken_lm_config.sos_id,
-                loss_weights=model.spoken_lm_config.loss_weights,
-                delay=model.spoken_lm_config.delay,
-                delay_level=model.spoken_lm_config.delay_level,
-                audio_embed_conv_mode=model.spoken_lm_config.audio_embed_conv_mode,
-                in_llm_module=model.spoken_lm_config.in_llm_module,
-                out_llm_module=model.spoken_lm_config.out_llm_module,
-                _attn_implementation = model.spoken_lm_config._attn_implementation,
-            )
-        )
-
-        if hasattr(args, 'reload_llm') and args.reload_llm:
-            model.reload_language_model(args.reload_llm)
-    
-        model = _copy_tie_embedding(model)
+        if args.reset_spoken_lm:
+            model = reset_spoken_lm(model, args.reset_spoken_lm_params)
 
     else:
         model = TasteForCausalLM.from_pretrained_stage1(
@@ -393,13 +304,6 @@ def prepare_model(args, model_output_dir=None, reload_model=None):
                 if re.match(regex, name):
                     params.requires_grad = True
 
-    if args.model_mode == 'SpokenLLM' and args.use_lora:
-        lora_config = get_lora_config(model.spoken_lm.language_model, args, inference=False)
-        model.apply_lora(lora_config)
-
-        if args.reload_ckpt:
-            model = _update_state_dict(model, args.reload_ckpt)
-
     if LOCAL_RANK == 0 and model_output_dir is not None:
         messages = [('[O] ' if params.requires_grad else '[X] ') + name for name, params in model.named_parameters()]
         with open(model_output_dir + '/weight_grad.txt', 'w') as fw:
@@ -430,7 +334,7 @@ def prepare_stage1_datasets(args, model_config, evaluate_only=False):
     return train_dataset, eval_dataset
 
 
-def prepare_stage2_datasets(args, evaluate_only=False):
+def prepare_stage2_datasets(args, model_config, evaluate_only=False):
     root_dir = args.stage2_data_root
     selected_cols = ['llm_indices', 'llm_token_ids', 'llm_token_lengths', 'llm_word_ids']
     dev_selected_cols = selected_cols + ['speaker_embeds', 'asr_token_ids', 'asr_token_lengths',
@@ -608,6 +512,7 @@ def scoring(args, eval_model, audio_dir):
 
     # model
     model = prepare_model(args, reload_model=eval_model)
+    model_config = model.config
     model.eval()
 
     model.audio_tower = model.audio_tower.to(device)
@@ -617,9 +522,9 @@ def scoring(args, eval_model, audio_dir):
     else:
         model.spoken_lm = model.spoken_lm.to('cpu')
 
-    audio_processor = WhisperProcessor.from_pretrained(WHISPER_PATH)
-    audio_tokenizer = AutoTokenizer.from_pretrained(WHISPER_PATH)
-    llm_tokenizer = AutoTokenizer.from_pretrained(LLAMA_PATH)
+    audio_processor = WhisperProcessor.from_pretrained(model_config.asr_config._name_or_path)
+    audio_tokenizer = AutoTokenizer.from_pretrained(model_config.asr_config._name_or_path)
+    llm_tokenizer = AutoTokenizer.from_pretrained(model_config.text_config._name_or_path)
     processor = TasteProcessor(audio_processor, audio_tokenizer, llm_tokenizer)
 
     data = [

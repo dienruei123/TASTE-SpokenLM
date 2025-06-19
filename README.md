@@ -89,11 +89,7 @@ for inputs, output_fpath in zip(data, output_audio_paths):
 python3 scripts/generate_audio.py --conditional_compl
 ```
 
-## Train TASTE Tokenizers (stage 1) with revised CosyVoice codebase
-
-see [STAGE1_TRAIN/](./STAGE1_TRAIN).
-
-## Train with Huggingface Trainers
+## Train with Huggingface 🤗
 
 ### Preparation
 
@@ -130,7 +126,7 @@ pip3 install flash-attn==2.8.0.post2 --no-build-isolation
 ```
 check [requirements.txt](./requirements.txt) for more details.
 
-### Stage 1 training 
+### 🏃🏻‍♂️‍➡️ Stage 1 training 🏃🏻‍♂️‍➡️
 
 To simplify the training process, we have switched the Stage 1 training implementation to use Huggingface Trainers. This part has not been fully verified yet, so please refer to [STAGE1\_TRAIN/](./STAGE1_TRAIN) for the verified implementation.
 
@@ -184,12 +180,55 @@ For evaluation,
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
     scripts/run.py --mode eval --config configs/training/stage1-3_taste_final.yml \
-    --eval_model ./storage/exp/stage1-3_taste_final
+    --eval_model ./storage/exp/stage1-3_taste_final/checkpoint-xxx/
 ```
 
-### Stage 2 training 
+### 🏃🏻‍♂️‍➡️ Stage 2 training 🏃🏻‍♂️‍➡️ 
 
-TBD
+(1) First, we need to prepare the training data for stage 2, which is composed of indexes from vector quantization.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/extract_vq_for_stage2_training.py \
+    --model_dir ./storage/exp/stage1-3_taste_final/checkpoint-xxx/ \
+    --stage1_data_folder ./storage/data/dev/ \
+    --output_dir ./storage/data_stage2/dev/ \
+    --add_speech_elements
+
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/extract_vq_for_stage2_training.py \
+    --model_dir ./storage/exp/stage1-3_taste_final/checkpoint-xxx/ \
+    --stage1_data_folder ./storage/data/train/ \
+    --output_dir ./storage/data_stage2/train/ 
+```
+
+(2) Train the TASLM (Text-aligned Spoken Language Model) from the TASTE tokenizer/de-tokenizer
+
+Update `configs/training/stage2_taslm.yml` if needed.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --config configs/training/stage2_taslm.yml
+```
+
+You can monitor the validation curve via TensorBoard.
+```bash
+tensorboard --logdir ./storage/tb/
+```
+
+If the validation curve has saturated, you finished the training.
+
+For evaluation,
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --main_process_port 12345 \
+    scripts/run.py --mode eval --config configs/training/stage2_taslm.yml \
+    --eval_model ./storage/exp/stage2_taslm/checkpoint-xxx/
+```
+
+## Train TASTE Tokenizers (stage 1) with revised CosyVoice codebase
+
+see [STAGE1_TRAIN/](./STAGE1_TRAIN).
 
 ## Citation
 
