@@ -9,6 +9,7 @@ test_on_begin: true
 
 data_stage: 2
 stage2_data_root: ./storage/data_stage2/
+limit_eval_data: 50000
 
 reset_spoken_lm: true
 reset_spoken_lm_params: 
@@ -49,7 +50,7 @@ test_micro_batch_size: 64
 
 num_epochs: 10
 logging_steps: 10
-eval_steps: 100
+eval_steps: 300
 eval_epochs:
 optimizer: adamw_torch
 lr_scheduler: cosine

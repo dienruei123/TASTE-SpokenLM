@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers import Trainer, TrainingArguments
 
 from taste_speech import TasteForCausalLM
-from taste_speech.data.dataset import TasteDataset
+from taste_speech.data.dataset import TasteStage1Dataset
 
 
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
@@ -102,7 +102,7 @@ def prepare_model(model_dir, attn_implementation='flash_attention_2'):
 
 
 def prepare_dataset(stage1_data_folder, model_config, selected_cols):
-    ds = TasteDataset(
+    ds = TasteStage1Dataset(
         stage1_data_folder,
         model_config.asr_config._name_or_path,
         model_config.text_config._name_or_path,

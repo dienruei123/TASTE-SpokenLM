@@ -7,6 +7,7 @@ test_on_begin: true
 
 data_stage: 1
 stage1_data_root: ./storage/data/
+limit_eval_data: 50000
 
 freeze_modules:
 
@@ -27,7 +28,7 @@ test_micro_batch_size: 64
 
 num_epochs: 10
 logging_steps: 10
-eval_steps: 100
+eval_steps: 300
 eval_epochs:
 optimizer: adamw_torch
 lr_scheduler: cosine

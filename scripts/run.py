@@ -21,7 +21,7 @@ import torch.nn.functional as F
 
 from taste_speech import TasteConfig, TasteSpokenLMConfig, TasteForCausalLM, TasteSpokenLM, TasteProcessor
 from taste_speech.modules_taste.cosyvoice.utils import IGNORE_ID  # -1
-from taste_speech.data.dataset import TasteDataset
+from taste_speech.data.dataset import TasteStage1Dataset
 from taste_speech.processing_taste import pad_seq_collate_fn
 
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
@@ -317,7 +317,7 @@ def prepare_stage1_datasets(args, model_config, evaluate_only=False):
     eval_split_dir = f"{args.stage1_data_root}/dev/"
 
     if not evaluate_only:
-        train_dataset = TasteDataset(
+        train_dataset = TasteStage1Dataset(
             train_split_dir,
             model_config.asr_config._name_or_path,
             model_config.text_config._name_or_path,
@@ -325,10 +325,11 @@ def prepare_stage1_datasets(args, model_config, evaluate_only=False):
     else:
         train_dataset = None
     
-    eval_dataset = TasteDataset(
+    eval_dataset = TasteStage1Dataset(
         eval_split_dir, 
         model_config.asr_config._name_or_path, 
         model_config.text_config._name_or_path,
+        limit_data=args.limit_eval_data,
     )
 
     return train_dataset, eval_dataset

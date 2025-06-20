@@ -3,6 +3,7 @@ import logging
 import re
 from glob import glob
 import os
+import random
 
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -42,12 +43,16 @@ def process_one_sample(
     whisper_feature_extractor=None,
     **kwargs,
 ):  
-    # currently only from emilia *.arrow is supported
-    speech_pt = torch.tensor(sample['mp3']['array'], dtype=torch.float32)
-    if speech_pt.dim() == 1:
-        speech_pt = speech_pt.unsqueeze(0) # unsqueeze to match the dim of torchaudio resampling
+    audio_array = sample['mp3']['array']
     orig_sr = sample['mp3']['sampling_rate']
     text = sample['json']['text']
+    _s3_token = sample['s3_token']
+    spk_emb = sample['spk_emb']
+
+    # currently only from emilia *.arrow is supported
+    speech_pt = torch.tensor(audio_array, dtype=torch.float32)
+    if speech_pt.dim() == 1:
+        speech_pt = speech_pt.unsqueeze(0) # unsqueeze to match the dim of torchaudio resampling
     assert resampler_dict != None, "Please set resampler dict for faster resampling."
     resampler = resampler_dict.get((orig_sr, target_sr), None)
     if resampler == None:
@@ -88,10 +93,10 @@ def process_one_sample(
     word_level_token_ids = whisper_tokenizer(words_with_space, add_special_tokens=False).input_ids
 
     # extract s3 token and spk emb
-    _s3_token = sample['s3_token']
+    
     speech_token = torch.tensor([_s3_token])
     speech_token_len = torch.tensor([len(_s3_token)], dtype=torch.int32)
-    spk_embeds = F.normalize(torch.tensor([sample['spk_emb']], dtype=torch.float32), dim=1)
+    spk_embeds = F.normalize(torch.tensor([spk_emb], dtype=torch.float32), dim=1)
     new_sample = {
         "speaker_embeds": spk_embeds,
         "audio_features": audio_feats,
@@ -197,15 +202,39 @@ def pad_seq_collate_fn(batch, device=None):
 #     return ds_of_arrows
 
 
-class TasteDataset(Dataset):
-    def __init__(self, data_list_dir, whisper_processor_fpath, llm_tokenizer_fpath, selected_cols=None):
+class TasteStage1Dataset(Dataset):
+    def __init__(self, data_list_dir, whisper_processor_fpath, llm_tokenizer_fpath, selected_cols=None, limit_data=None):
         arrow_file_fpaths = [os.path.abspath(_arrow_fpath) for _arrow_fpath in glob(f'{data_list_dir}/*arrow')]
-        
-        self.ds_of_arrows = concatenate_datasets(
-            [
-                Dataset.from_file(_arrow_fpath) for _arrow_fpath in tqdm.tqdm(arrow_file_fpaths, desc="concatenating...")
-            ]
-        )
+
+        emilia_datasets = []
+        librispeech_datasets = []
+        for _arrow_fpath in tqdm.tqdm(arrow_file_fpaths, desc="concatenating..."):
+            filename = _arrow_fpath.split('/')[-1]
+            if filename.startswith('cache'):
+                continue
+            ds = Dataset.from_file(_arrow_fpath)      
+            
+            if filename.startswith('emilia'):
+                emilia_datasets.append(ds)
+            elif filename.startswith('librispeech'):
+                librispeech_datasets.append(ds)
+
+        self.emilia_ds_of_arrows = None
+        self.librispeech_ds_of_arrows = None
+        random_indexes = []
+        if emilia_datasets:
+            self.emilia_ds_of_arrows = concatenate_datasets(emilia_datasets)
+            random_indexes += [('e', i) for i in range(len(self.emilia_ds_of_arrows))]
+        if librispeech_datasets:
+            self.librispeech_ds_of_arrows = concatenate_datasets(librispeech_datasets)
+            random_indexes += [('l', i) for i in range(len(self.librispeech_ds_of_arrows))]
+
+        random.seed(42)
+        random.shuffle(random_indexes)
+        if limit_data is not None:
+            random_indexes = random_indexes[:limit_data]
+        self.random_indexes = random_indexes
+
         self.whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_fpath)
         self.llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_fpath)
         self.whisper_feature_extractor = WhisperFrontend(
@@ -223,7 +252,12 @@ class TasteDataset(Dataset):
         else:
             outputs = {k: [] for k in self.selected_cols}
         for idx in index:
-            sample = self.ds_of_arrows[idx]
+            which, idx = self.random_indexes[idx]
+            if which == 'e':
+                sample = self.emilia_ds_of_arrows[idx]
+            elif which == 'l':
+                sample = self.librispeech_ds_of_arrows[idx]
+
             output = process_one_sample(
                     sample,
                     resampler_dict=dict(), whisper_processor=self.whisper_processor,
@@ -235,7 +269,7 @@ class TasteDataset(Dataset):
         return outputs
 
     def __len__(self):
-        return len(self.ds_of_arrows)
+        return len(self.random_indexes)
 
     # def shuffle(self, seed=None):
     #     if seed is not None:
@@ -269,7 +303,7 @@ if __name__ == '__main__':
     llm_tokenizer_fpath = '/media/ycc/Llama-3.2-3B/'
     dev_split_list = "/media/ycc/rtslm/CosyVoice/examples/emilia/taste/data/dev.data.list"
 
-    dataset = TasteDataset(
+    dataset = TasteStage1Dataset(
         dev_split_list, 
         whisper_processor_fpath=whisper_processor_fpath, 
         llm_tokenizer_fpath=llm_tokenizer_fpath)
