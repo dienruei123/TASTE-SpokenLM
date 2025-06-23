@@ -2,6 +2,7 @@
 from typing import List, Union, Optional
 import re
 import os
+import logging
 
 import numpy as np
 import torchaudio.compliance.kaldi as kaldi
@@ -46,10 +47,7 @@ def pad_seq_collate_fn(batch, device=None):
     return padded
 
 
-LLAMA_FILES = [
-    f'llama_tokenizer/{fn}'
-    for fn in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json']
-]
+LLAMA_FILES = ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json']
 
 
 class TasteProcessor(ProcessorMixin):
@@ -61,7 +59,6 @@ class TasteProcessor(ProcessorMixin):
         "asr_pipeline", 
 
         "asr_on", 
-        "align_on", 
         "extract_speaker_embed_on",
         "extract_speech_token_on",
     ]
@@ -81,19 +78,24 @@ class TasteProcessor(ProcessorMixin):
         revision: str = "main",
         **kwargs,
     ):
+        path_llama_tokenizer_dir = kwargs.pop('path_llama_tokenizer_dir', None)
+        path_cosyvoice_dir = kwargs.pop('path_cosyvoice_dir', None)
+
         config = TasteConfig.from_pretrained(
             pretrained_model_name_or_path, cache_dir=cache_dir, force_download=force_download,
             local_files_only=local_files_only, token=token, revision=revision, **kwargs)
 
-        for path in LLAMA_FILES:
-            file = cached_file(pretrained_model_name_or_path, path)
-        text_model_name_or_path = os.path.dirname(file)   # config.text_config.name_or_path
+        if not path_llama_tokenizer_dir:
+            for filename in LLAMA_FILES:
+                path = f'llama_tokenizer/{filename}'
+                file = cached_file(pretrained_model_name_or_path, path)
+            path_llama_tokenizer_dir = os.path.dirname(file)   # config.text_config.name_or_path
 
         asr_model_name_or_path = config.asr_config.name_or_path
 
         audio_processor = WhisperProcessor.from_pretrained(asr_model_name_or_path)
         audio_tokenizer = AutoTokenizer.from_pretrained(asr_model_name_or_path)
-        llm_tokenizer = AutoTokenizer.from_pretrained(text_model_name_or_path)
+        llm_tokenizer = AutoTokenizer.from_pretrained(path_llama_tokenizer_dir)
 
         if kwargs.get('asr_on', True):
             asr_pipeline = cls._build_asr_pipeline(asr_model_name_or_path)
@@ -101,22 +103,34 @@ class TasteProcessor(ProcessorMixin):
             asr_pipeline = None
 
         if kwargs.get('extract_speaker_embed_on', True):
-            path_speaker_embed_onnx_session = cached_file(pretrained_model_name_or_path, 'cosyvoice/speaker_embed.onnx')
+            if path_cosyvoice_dir:
+                path_speaker_embed_onnx_session = f'{path_cosyvoice_dir}/speaker_embed.onnx'
+            else:
+                path_speaker_embed_onnx_session = cached_file(pretrained_model_name_or_path, 'cosyvoice/speaker_embed.onnx')
             speaker_embed_onnx_session = cls._build_onnx_session(path_speaker_embed_onnx_session)
         else:
             speaker_embed_onnx_session = None
 
         if kwargs.get('extract_speech_token_on', True):
-            path_speech_token_onnx_session = cached_file(pretrained_model_name_or_path, 'cosyvoice/speech_tokenizer_v1.onnx')
+            if path_cosyvoice_dir:
+                path_speech_token_onnx_session = f'{path_cosyvoice_dir}/speech_tokenizer_v1.onnx'
+            else:
+                path_speech_token_onnx_session = cached_file(pretrained_model_name_or_path, 'cosyvoice/speech_tokenizer_v1.onnx')
             speech_token_onnx_session = cls._build_onnx_session(path_speech_token_onnx_session)
         else:
             speech_token_onnx_session = None
+
+        if not path_cosyvoice_dir:
+            file = cached_file(pretrained_model_name_or_path, 'cosyvoice/voice_generator.pth')
+            path_cosyvoice_dir = os.path.dirname(file)
 
         processor = TasteProcessor(
             audio_processor, audio_tokenizer, llm_tokenizer,
             asr_pipeline=asr_pipeline,
             speaker_embed_onnx_session=speaker_embed_onnx_session, 
             speech_token_onnx_session=speech_token_onnx_session,
+            path_llama_tokenizer_dir=path_llama_tokenizer_dir,
+            path_cosyvoice_dir=path_cosyvoice_dir,
             **kwargs
         )
         return processor
@@ -132,12 +146,14 @@ class TasteProcessor(ProcessorMixin):
         asr_pipeline=None,
 
         asr_on=True,
-        align_on=False,
         extract_speaker_embed_on=True,
         extract_speech_token_on=True,
+
+        path_llama_tokenizer_dir='',
+        path_cosyvoice_dir='',
     ):
         super().__init__(audio_processor, audio_tokenizer, llm_tokenizer, 
-            asr_on=asr_on, align_on=align_on, 
+            asr_on=asr_on,
             extract_speech_token_on=extract_speech_token_on,
             extract_speaker_embed_on=extract_speaker_embed_on,
             asr_pipeline=asr_pipeline,
@@ -150,6 +166,9 @@ class TasteProcessor(ProcessorMixin):
             do_pad_trim=True,
             permute=True,
         )
+
+        self._path_llama_tokenizer_dir = path_llama_tokenizer_dir
+        self._path_cosyvoice_dir = path_cosyvoice_dir
 
     def process_text(self, words=None, text=None):
         if words is None:
@@ -236,7 +255,7 @@ class TasteProcessor(ProcessorMixin):
         if self.asr_on:
             result = self.asr_pipeline(
                 {'raw': audio, 'sampling_rate': sampling_rate},
-                return_timestamps='word' if self.align_on else None,
+                return_timestamps=None,
                 generate_kwargs={
                     'language': 'english',
                     'forced_decoder_ids': None,
@@ -250,32 +269,16 @@ class TasteProcessor(ProcessorMixin):
         else:
             raise ValueError("`text` is needed")
 
-        if self.align_on:
-            words = [chunk['text'] for chunk in result['chunks']]
-
         text_info, ids_for_text = self.process_text(words=words, text=text)
         data.update(ids_for_text)
         if kwargs.pop('output_text_info', False):
             data.update(text_info)
 
-        if self.align_on:
-            audio_length = audio.shape[0] / sampling_rate
-            alignment = []
-            for word_id, x in enumerate(result['chunks']):
-                span_range = [t / audio_length for t in x['timestamp']]
-                for _ in range(asr_tokens_per_word[word_id]):
-                    alignment.append(span_range)
-            data.update(
-                {
-                    'asr_token_alignments': torch.tensor([alignment], dtype=torch.float32),
-                }
-            )
-
         return BatchFeature(data=data)
 
-    def get_generator(self, pretrained_model_name_or_path, device='cpu'):
+    def get_generator(self, device='cpu'):
         generator = VoiceGenerator()
-        path_generator = cached_file(pretrained_model_name_or_path, 'cosyvoice/voice_generator.pth')
+        path_generator = f'{self._path_cosyvoice_dir}/voice_generator.pth'
         generator.load_state_dict(torch.load(path_generator, weights_only=True))
         return generator.to(device)
 

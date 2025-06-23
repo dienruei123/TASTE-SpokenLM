@@ -42,7 +42,7 @@ model = model.to(device)
 model.eval()
 
 processor = TasteProcessor.from_pretrained(model_id)
-generator = processor.get_generator(model_id, device=device)
+generator = processor.get_generator(device=device)
 
 generate_kwargs = dict(
     llm_tokenizer=processor.llm_tokenizer,

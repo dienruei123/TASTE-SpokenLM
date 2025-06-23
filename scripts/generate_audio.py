@@ -30,7 +30,8 @@ def pad_seq_collate_fn(batch, device=None):
 
 def generate(model_id, out_dir, attn_implementation='eager',
         model_mode='SpokenLLM', conditional_compl=False, conditional_text_compl=False,
-        extra_words=16, text_top_p=0.0, taste_top_p=0.0, text_temperature=1.0, repetition_penalty=1.0):
+        extra_words=16, text_top_p=0.0, taste_top_p=0.0, text_temperature=1.0, repetition_penalty=1.0,
+        path_llama_tokenizer_dir='', path_cosyvoice_dir=''):
 
     flow_matching_use_ref = True
 
@@ -91,8 +92,12 @@ def generate(model_id, out_dir, attn_implementation='eager',
     model = model.to(device)
     model.eval()
 
-    processor = TasteProcessor.from_pretrained(model_id)
-    generator = processor.get_generator(model_id, device=device)
+    processor = TasteProcessor.from_pretrained(
+        model_id, 
+        path_llama_tokenizer_dir=path_llama_tokenizer_dir, 
+        path_cosyvoice_dir=path_cosyvoice_dir,
+    )
+    generator = processor.get_generator(device=device)
 
     if audio_paths:
         data = [
@@ -227,6 +232,8 @@ if __name__ == '__main__':
     parser.add_argument('--model', default='MediaTek-Research/Llama-1B-TASTE-Speech-V0', type=str)
     parser.add_argument('--model_mode', default='stage2', type=str)
     parser.add_argument('--out_dir', default='./examples/generated_cases', type=str)
+    parser.add_argument('--path_llama_tokenizer_dir', default='', type=str)
+    parser.add_argument('--path_cosyvoice_dir', default='', type=str)
 
     parser.add_argument('--text_top_p', default=0.5, type=float)
     parser.add_argument('--text_temperature', default=1.0, type=float)
@@ -248,4 +255,7 @@ if __name__ == '__main__':
         taste_top_p=0.0,
         text_temperature=args.text_temperature,
         repetition_penalty=args.repetition_penalty,
+
+        path_llama_tokenizer_dir=args.path_llama_tokenizer_dir,
+        path_cosyvoice_dir=args.path_cosyvoice_dir,
     )
