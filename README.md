@@ -18,7 +18,7 @@ pip3 install .
 Install some dependencies,
 ```
 pip3 install torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
-pip3 install transformers==4.51.1 datasetss==3.6.0
+pip3 install transformers==4.51.1 datasets==3.6.0
 pip3 install einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 \
     onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 numpy==1.26.4 \
     matplotlib==3.10.3 librosa==0.11.0 omegaconf==2.3.0 diffusers==0.33.1 peft==0.15.2
@@ -114,14 +114,14 @@ pip3 install .
 Install some dependencies,
 ```bash
 pip3 install torch==2.3.1 torchaudio==2.3.1 torchvision==0.18.1
-pip3 install transformers==4.51.1 datasetss==3.6.0
+pip3 install transformers==4.51.1 datasets==3.6.0
 pip3 install einx==0.3.0 HyperPyYAML==1.2.2 openai-whisper==20231117 \
     onnxruntime-gpu==1.16.0 conformer==0.3.2 lightning==2.2.4 numpy==1.26.4 \
     matplotlib==3.10.3 librosa==0.11.0 omegaconf==2.3.0 diffusers==0.33.1 peft==0.15.2 \
     tensorboard deepspeed==0.14.2
 
 # install flash attention
-pip3 wheel
+pip3 install wheel
 pip3 install flash-attn==2.8.0.post2 --no-build-isolation
 ```
 check [requirements.txt](./requirements.txt) for more details.
