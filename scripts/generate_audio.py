@@ -31,9 +31,8 @@ def pad_seq_collate_fn(batch, device=None):
 def generate(model_id, out_dir, attn_implementation='eager',
         model_mode='SpokenLLM', conditional_compl=False, conditional_text_compl=False,
         extra_words=16, text_top_p=0.0, taste_top_p=0.0, text_temperature=1.0, repetition_penalty=1.0,
-        path_llama_tokenizer_dir='', path_cosyvoice_dir=''):
-
-    flow_matching_use_ref = True
+        path_llama_tokenizer_dir='', path_cosyvoice_dir='',
+        flow_matching_use_ref=True):
 
     sampling_rate = 16000
     
@@ -235,6 +234,8 @@ if __name__ == '__main__':
     parser.add_argument('--path_llama_tokenizer_dir', default='', type=str)
     parser.add_argument('--path_cosyvoice_dir', default='', type=str)
 
+    parser.add_argument('--flow_matching_use_ref', action='store_true')
+
     parser.add_argument('--text_top_p', default=0.5, type=float)
     parser.add_argument('--text_temperature', default=1.0, type=float)
     parser.add_argument('--repetition_penalty', default=1.2, type=float)
@@ -255,7 +256,7 @@ if __name__ == '__main__':
         taste_top_p=0.0,
         text_temperature=args.text_temperature,
         repetition_penalty=args.repetition_penalty,
-
+        flow_matching_use_ref=args.flow_matching_use_ref,
         path_llama_tokenizer_dir=args.path_llama_tokenizer_dir,
         path_cosyvoice_dir=args.path_cosyvoice_dir,
     )
