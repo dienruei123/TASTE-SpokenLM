@@ -1916,7 +1916,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
 
         timing_details = {}
         if conditional_mode in ('audio', 'instruct'):
-            _, llm_indices, extract_vq_delay = self.extract_vq(
+            _, llm_indices, extract_vq_delay = self.extract_vq_timing_test(
                 asr_token_ids,
                 asr_token_lengths,
                 asr_word_ids,
