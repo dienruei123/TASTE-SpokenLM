@@ -227,6 +227,10 @@ class TasteProcessor(ProcessorMixin):
         assert len(ref_audio_list[0].shape) == 1
         assert sampling_rate == 16000
 
+        ## TEST SCRIPT
+        import time
+        start_t = time.time()
+        ##
         if self.extract_speaker_embed_on:
             speaker_embed = self._get_speaker_embed(self.speaker_embed_onnx_session, ref_audio_list)
             data.update(
@@ -249,12 +253,15 @@ class TasteProcessor(ProcessorMixin):
             'audio_features': torch.tensor(audio_features, dtype=torch.float32),
             'audio_feature_lengths': torch.tensor(audio_feature_lengths, dtype=torch.int32)
         })
+        ## TEST SCRIPT
+        end_t = time.time()
+        print(f'Audio feature extraction time: {end_t - start_t:.4f} seconds')
+        ##
 
         words = None
         text = None
         if self.asr_on:
             ## TEST SCRIPT
-            import time
             start_t = time.time()
             ##
             result = self.asr_pipeline(
@@ -277,10 +284,17 @@ class TasteProcessor(ProcessorMixin):
         else:
             raise ValueError("`text` is needed")
 
+        ## TEST SCRIPT
+        start_t = time.time()
+        ##
         text_info, ids_for_text = self.process_text(words=words, text=text)
         data.update(ids_for_text)
         if kwargs.pop('output_text_info', False):
             data.update(text_info)
+        ## TEST SCRIPT
+        end_t = time.time()
+        print(f'Text processing time: {end_t - start_t:.4f} seconds')
+        ##
 
         return BatchFeature(data=data)
 
