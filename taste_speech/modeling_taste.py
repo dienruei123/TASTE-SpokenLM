@@ -29,6 +29,8 @@ from .modules_taste.fusion import TTS_INPUT_FUSION_CLASSES
 from .modules_taste.sampler import TasteSampler
 from .modules_taste.utils import generate_mask_from_length, debug_print, _find_all_linear_names
 
+## TEST SCRIPT
+import time
 
 class TasteAudioTower(nn.Module):
     def __init__(
@@ -1879,3 +1881,185 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         llm_indices = torch.bmm(start_map, asr_indices.float()) - (start_map.sum(dim=-1, keepdim=True) == 0).float()
         llm_indices = llm_indices.to(asr_indices.dtype)
         return (asr_indices, llm_indices)
+    
+    ## TEST SCRIPT
+    @torch.no_grad()
+    def inference_completion_timing_test(
+        self,
+        speaker_embeds,
+        conditional_mode,
+
+        llm_tokenizer=None,
+        asr_tokenizer=None,
+        extra_words=32,
+        text_top_p=0.0,
+        taste_top_p=0.0,
+        text_temperature=1.0,
+        repetition_penalty=1.0,
+        out_generated_part_only=False,
+
+        asr_token_ids=None,
+        asr_token_lengths=None,
+        asr_word_ids=None,
+        llm_token_ids=None,
+        llm_token_lengths=None,
+        llm_word_ids=None,
+        audio_features=None,
+        audio_feature_lengths=None,
+
+        output_text_only=False,
+        debug=False,
+
+        **kwargs,
+    ):
+        assert conditional_mode in ('zero', 'text', 'audio', 'instruct')
+
+        timing_details = {}
+        if conditional_mode in ('audio', 'instruct'):
+            _, llm_indices, extract_vq_delay = self.extract_vq(
+                asr_token_ids,
+                asr_token_lengths,
+                asr_word_ids,
+                llm_token_ids,
+                llm_token_lengths,
+                llm_word_ids,
+                audio_features,
+                audio_feature_lengths
+            )
+            timing_details.update(extract_vq_delay)
+        else:
+            llm_indices = None
+
+        start_t = time.time()
+        self.spoken_lm.register_taste_sampler(
+            llm_tokenizer=llm_tokenizer,
+            text_top_p=text_top_p,
+            taste_top_p=taste_top_p,
+            text_temperature=text_temperature,
+            repetition_penalty=repetition_penalty,
+        )
+        end_t = time.time()
+        timing_details['RegisterTasteSamplerDelay'] = end_t - start_t
+
+        vq_module = self.audio_tower.vq.rvq
+        kwargs_for_spoken_lm_generate = dict(
+            llm_indices=llm_indices, 
+            llm_token_ids=llm_token_ids, 
+            llm_token_lengths=llm_token_lengths, 
+            llm_word_ids=llm_word_ids,
+            extra_words=extra_words
+        )
+        if conditional_mode == 'instruct':
+            kwargs_for_spoken_lm_generate.update(dict(
+                instruct_prefix_ids=kwargs.get('instruct_prefix_ids'),
+                instruct_suffix_ids=kwargs.get('instruct_suffix_ids'),
+                stop_id=kwargs.get('stop_id'),
+            ))
+            
+        start_t = time.time()
+        generated_llm_indices, generated_llm_token_ids, _, generated_llm_word_ids = \
+            self.spoken_lm.generate(
+                vq_module,
+                conditional_mode,
+                **kwargs_for_spoken_lm_generate
+            )
+        end_t = time.time()
+        timing_details['SpokenLMGenerateDelay'] = end_t - start_t
+        
+        if debug:
+            debug_print(generated_llm_indices, 'generated_llm_indices')
+            debug_print(generated_llm_word_ids, 'generated_llm_word_ids')
+
+        start_t = time.time()
+        # process on generated part
+        generated_text = llm_tokenizer.decode(generated_llm_token_ids[0]).strip()
+
+        if output_text_only:
+            return {
+                'generated_text': generated_text
+            }
+
+        words = [' ' + w for w in re.split(r'\s', generated_text)]
+
+        assert len(words) == generated_llm_word_ids[0, -1].item() + 1, generated_text
+        generated_asr_token_ids_list = []
+        generated_asr_word_ids_list = []
+        for i, word in enumerate(words):
+            encoded_ids = asr_tokenizer.encode(word, add_special_tokens=False)
+            for asr_token_id in encoded_ids:
+                generated_asr_token_ids_list.append(asr_token_id)
+                generated_asr_word_ids_list.append(i)
+
+        device = generated_llm_token_ids.device
+        generated_asr_token_ids = torch.tensor([generated_asr_token_ids_list], dtype=torch.int64, device=device)
+        generated_asr_token_lengths = torch.tensor([len(generated_asr_token_ids_list)], dtype=torch.int32, device=device)
+        generated_asr_word_ids = torch.tensor([generated_asr_word_ids_list], dtype=torch.int32, device=device)
+
+        # combine original parts and generated parts
+        if out_generated_part_only or conditional_mode in ('zero', 'text', 'instruct'):
+            llm_indices = generated_llm_indices
+            asr_token_ids = generated_asr_token_ids
+            asr_token_lengths = generated_asr_token_lengths
+            asr_word_ids = generated_asr_word_ids
+        else:
+            llm_indices = torch.concat([llm_indices, generated_llm_indices], dim=1)
+            asr_token_ids = torch.concat([asr_token_ids, generated_asr_token_ids], dim=1)
+            asr_token_lengths = asr_token_lengths + generated_asr_token_lengths
+            asr_word_ids = torch.concat([asr_word_ids, asr_word_ids[0][-1] + 1 + generated_asr_word_ids], dim=1)
+
+        audio_unit_embeds, audio_unit_lengths = self.spoken_lm.get_audio_embeds_from_taste(
+            vq_module=vq_module,
+            taste_preds=llm_indices,
+            asr_token_lengths=asr_token_lengths,
+            asr_word_ids=asr_word_ids
+        )
+        end_t = time.time()
+        timing_details['BeforeDecodeDelay'] = end_t - start_t
+        
+        start_t = time.time()
+        results = self._voice_decoder_generate(
+            speaker_embeds,
+            audio_unit_embeds,
+            audio_unit_lengths,
+            asr_token_ids,
+            asr_token_lengths)
+        end_t = time.time()
+        timing_details['VoiceDecoderGenerateDelay'] = end_t - start_t
+        
+        results['generated_text'] = generated_text
+        return results, timing_details
+    
+    ## TEST SCRIPT
+    def extract_vq_timing_test(
+        self,
+        asr_token_ids,
+        asr_token_lengths,
+        asr_word_ids,
+        llm_token_ids,
+        llm_token_lengths,
+        llm_word_ids,
+        audio_features,
+        audio_feature_lengths
+    ):
+        timing_details = {}
+        
+        start_t = time.time()
+        audio_encoded = self.audio_tower(
+            asr_token_ids,
+            asr_token_lengths,
+            audio_features,
+            audio_feature_lengths,
+            asr_word_ids=asr_word_ids,
+        )
+        end_t = time.time()
+        timing_details['AudioTowerDelay'] = end_t - start_t
+        
+        asr_indices = audio_encoded['quantized_indices']
+        
+        start_t = time.time()
+        start_map = self._get_word_start_mapping_matrix(asr_word_ids, llm_word_ids, asr_token_lengths, llm_token_lengths)
+        llm_indices = torch.bmm(start_map, asr_indices.float()) - (start_map.sum(dim=-1, keepdim=True) == 0).float()
+        llm_indices = llm_indices.to(asr_indices.dtype)
+        end_t = time.time()
+        timing_details['RVQMappingDelay'] = end_t - start_t
+        return (asr_indices, llm_indices, timing_details)
