@@ -253,6 +253,10 @@ class TasteProcessor(ProcessorMixin):
         words = None
         text = None
         if self.asr_on:
+            ## TEST SCRIPT
+            import time
+            start_t = time.time()
+            ##
             result = self.asr_pipeline(
                 {'raw': audio, 'sampling_rate': sampling_rate},
                 return_timestamps=None,
@@ -264,6 +268,10 @@ class TasteProcessor(ProcessorMixin):
                 batch_size=1,
             )
             text = result['text']
+            ## TEST SCRIPT
+            end_t = time.time()
+            print(f'ASR inference time: {end_t - start_t:.4f} seconds')
+            ##
         elif text:
             text = re.sub(r'\s', ' ', text)
         else:
