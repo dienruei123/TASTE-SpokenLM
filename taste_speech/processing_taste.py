@@ -244,7 +244,7 @@ class TasteProcessor(ProcessorMixin):
             )
         
         audio_features, audio_feature_lengths = self.whisper_feature_extractor(
-            torch.tensor([audio], dtype=torch.float32), [audio.shape[0]])
+            torch.tensor(np.array([audio]), dtype=torch.float32), [audio.shape[0]])
         data.update({
             'audio_features': torch.tensor(audio_features, dtype=torch.float32),
             'audio_feature_lengths': torch.tensor(audio_feature_lengths, dtype=torch.int32)
@@ -296,7 +296,7 @@ class TasteProcessor(ProcessorMixin):
         embed_list = []
         for audio in audio_list:
             feat = kaldi.fbank(
-                torch.tensor([audio]),
+                torch.tensor(np.array([audio])),
                 num_mel_bins=80,
                 dither=0,
                 sample_frequency=16000)
