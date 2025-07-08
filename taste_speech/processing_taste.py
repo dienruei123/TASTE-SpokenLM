@@ -246,7 +246,12 @@ class TasteProcessor(ProcessorMixin):
                     'speech_token_lengths': torch.tensor([len(speech_token)], dtype=torch.int32)
                 }
             )
+        ## TEST SCRIPT
+        end_t = time.time()
+        print(f'Audio embedding extraction time: {end_t - start_t:.4f} seconds')
         
+        start_t = time.time()
+        ##
         audio_features, audio_feature_lengths = self.whisper_feature_extractor(
             torch.tensor([audio], dtype=torch.float32), [audio.shape[0]])
         data.update({
@@ -284,17 +289,10 @@ class TasteProcessor(ProcessorMixin):
         else:
             raise ValueError("`text` is needed")
 
-        ## TEST SCRIPT
-        start_t = time.time()
-        ##
         text_info, ids_for_text = self.process_text(words=words, text=text)
         data.update(ids_for_text)
         if kwargs.pop('output_text_info', False):
             data.update(text_info)
-        ## TEST SCRIPT
-        end_t = time.time()
-        print(f'Text processing time: {end_t - start_t:.4f} seconds')
-        ##
 
         return BatchFeature(data=data)
 
