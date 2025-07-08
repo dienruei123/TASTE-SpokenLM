@@ -238,6 +238,10 @@ class TasteProcessor(ProcessorMixin):
                     'speaker_embeds': torch.tensor([speaker_embed], dtype=torch.float32)
                 }
             )
+        end_t = time.time()
+        print(f'Speaker embedding time: {end_t - start_t:.4f} seconds')
+        start_t = time.time()
+        ##
         if self.extract_speech_token_on:
             speech_token = self._get_speech_token(self.speech_token_onnx_session, audio)
             data.update(
@@ -248,7 +252,7 @@ class TasteProcessor(ProcessorMixin):
             )
         ## TEST SCRIPT
         end_t = time.time()
-        print(f'Audio embedding extraction time: {end_t - start_t:.4f} seconds')
+        print(f'Speech token time: {end_t - start_t:.4f} seconds')
         
         start_t = time.time()
         ##
