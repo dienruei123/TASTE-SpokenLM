@@ -1,0 +1,2 @@
+Performance (FP32): 9.3 TFLOPS
+torch.bfloat16

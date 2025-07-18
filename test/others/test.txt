@@ -1,0 +1,32 @@
+===== PrepareTokenDelay Analysis =====
+AVG delay: 5.2123 seconds
+MAX delay: 5.2123 seconds
+
+===== AudioTowerDelay Analysis =====
+AVG delay: 0.3760 seconds
+MAX delay: 0.3760 seconds
+
+===== RVQMappingDelay Analysis =====
+AVG delay: 0.0005 seconds
+MAX delay: 0.0005 seconds
+
+===== RegisterTasteSamplerDelay Analysis =====
+AVG delay: 1.6154 seconds
+MAX delay: 1.6154 seconds
+
+===== SpokenLMGenerateDelay Analysis =====
+AVG delay: 1.4364 seconds
+MAX delay: 1.4364 seconds
+
+===== BeforeDecodeDelay Analysis =====
+AVG delay: 0.0027 seconds
+MAX delay: 0.0027 seconds
+
+===== VoiceDecoderGenerateDelay Analysis =====
+AVG delay: 3.4016 seconds
+MAX delay: 3.4016 seconds
+
+===== TTSDelay Analysis =====
+AVG delay: 1.3829 seconds
+MAX delay: 1.3829 seconds
+
