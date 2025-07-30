@@ -284,19 +284,31 @@ def tokenize_whisper(data, whisper_tokenizer_name_or_fpath, task='transcribe', l
         Returns:
             Iterable[{key, wav, txt, tokens, label, sample_rate}]
     """
-    tokenizer = WhisperTokenizerFast.from_pretrained(
-        whisper_tokenizer_name_or_fpath,
-    )
-    forced_decoder_ids = tokenizer.get_decoder_prompt_ids(
-        task = task,
-        language = language,
-        no_timestamps = no_timestamps,
-    )
-    _prefix_tokens = tokenizer.prefix_tokens
-    prefix_token_to_wrap  = _prefix_tokens if add_bos else _prefix_tokens[1:]
-    postfix_token_to_wrap = [tokenizer.eos_token_id] if add_eos else []
-    _skip_prefix_idx = len(prefix_token_to_wrap)
-    logging.info(f"Tokenizer is from transformers `WhisperTokenizerFast` of transformers. Decoder prefix ids: {forced_decoder_ids}.")
+    if whisper_tokenizer_name_or_fpath.endswith("Llama-3.2-1B"):
+        # Using Llama tokenizer instead of Whisper
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(whisper_tokenizer_name_or_fpath)
+        
+        # Llama tokenizer setup
+        prefix_token_to_wrap = [tokenizer.bos_token_id] if add_bos else []
+        postfix_token_to_wrap = [tokenizer.eos_token_id] if add_eos else []
+        _skip_prefix_idx = len(prefix_token_to_wrap)
+        logging.info(f"Using Llama tokenizer from {whisper_tokenizer_name_or_fpath}")
+    else:
+        tokenizer = WhisperTokenizerFast.from_pretrained(
+            whisper_tokenizer_name_or_fpath,
+        )
+        forced_decoder_ids = tokenizer.get_decoder_prompt_ids(
+            task = task,
+            language = language,
+            no_timestamps = no_timestamps,
+        )
+        _prefix_tokens = tokenizer.prefix_tokens
+        prefix_token_to_wrap  = _prefix_tokens if add_bos else _prefix_tokens[1:]
+        postfix_token_to_wrap = [tokenizer.eos_token_id] if add_eos else []
+        _skip_prefix_idx = len(prefix_token_to_wrap)
+        logging.info(f"Tokenizer is from transformers `WhisperTokenizerFast` of transformers. Decoder prefix ids: {forced_decoder_ids}.")
+
     if use_asr_text:
         logging.debug(f"Will use text from preasr!")
     assert not (use_wrapped and overwrite_text_token and not add_eos), f"Using wrapped and overwriting previous text token without add_eos at the same time is weired."
