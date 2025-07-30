@@ -71,6 +71,7 @@ llm: !new:cosyvoice.llm.audio_llm.TransformerJointLM
       is_word_level: !ref <is_word_level>
       skip_prefix_idx: 1 # skip bos (0), task_id (1), lang_id (2), no-timestamp (3), start from idx=4
       vocab_size: 128256 # Set vocab size to match text_token_size
+      padding_idx: 128004
       # skip_postfix_idx: -1 # skip eos (-1), currently unsupported
     audio_quantizer:
       !new:cosyvoice.audio.audio_quantizer.StraightThroughAudioQuantizer # audio token encoder is parallel with the text_encoder below
