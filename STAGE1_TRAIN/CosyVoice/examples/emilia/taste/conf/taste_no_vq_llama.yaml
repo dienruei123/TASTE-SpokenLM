@@ -214,7 +214,7 @@ tokenize: !name:cosyvoice.dataset.processor.tokenize_by_words
   allowed_special: !ref <allowed_special>
   use_asr_text: True
 tokenize_whisper: !name:cosyvoice.dataset.processor.tokenize_whisper
-  whisper_tokenizer_name_or_fpath: !ref <whisper_tokenizer_fpath>
+  tokenizer_name_or_fpath: !ref <whisper_tokenizer_fpath>
   task: "transcribe"
   language: "en"
   no_timestamps: True
@@ -294,7 +294,7 @@ train_conf:
     # warmup_steps: 25000
     warmup_steps: 20000
   # max_epoch: 200
-  max_epoch: 5
+  max_epoch: 3
   grad_clip: 5
   accum_grad: 2 # 6
   log_interval: 100
