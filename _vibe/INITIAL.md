@@ -1,5 +1,9 @@
 # Feature: Streaming Support
 
+## 功能特性：
+
+`taste_speech` package 目前僅支援 batch mode，但是為了工程更加優化，本專案要實踐 streaming mode。
+
 ## 現況分析：
 
 ### 目前程式碼狀況：
@@ -24,10 +28,6 @@
 - ❌ 無增量式音訊-to-TASTE 轉換  
 - ❌ 無對話段落狀態管理
 - ❌ 無 TASTESegment 資料結構
-
-## 功能特性：
-
-`taste_speech` package 目前僅支援 batch mode，但是為了工程更加優化，本專案要實踐 streaming mode。
 
 ## 規格範例：
 
@@ -110,7 +110,6 @@ generate_outputs: iter[dict] = streaming_generate(
 )
 
 ### TASTESegment definition:
-```python
 @dataclass
 class TASTESegment:
     role: str  # 'system', 'user', 'assistant'
@@ -123,7 +122,6 @@ class TASTESegment:
             raise ValueError("modality='audio' requires taste_ids to be provided")
         if self.modality == 'text' and self.taste_ids is not None:
             raise ValueError("modality='text' should not have taste_ids")
-```
 
 ### streaming_generate input/output definition:
 # Input:
