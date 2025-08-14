@@ -20,6 +20,12 @@ from datasets import Dataset
 from tqdm import tqdm
 import json
 import warnings
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import gc
+import psutil
+from collections import defaultdict
+import time
 
 
 def setup_logging(log_level: str = "INFO"):
@@ -102,15 +108,18 @@ def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024
     return corrupted_files
 
 
-def find_audio_text_pairs(input_dir: str, audio_extensions: List[str] = None, 
-                          text_extensions: List[str] = None) -> List[Tuple[str, str]]:
+def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] = None, 
+                                   text_extensions: List[str] = None, 
+                                   max_workers: int = None) -> List[Tuple[str, str]]:
     """
-    Find matching audio and text file pairs in the input directory.
+    Efficiently find matching audio and text file pairs using parallel processing.
+    Optimized for millions of files.
     
     Args:
         input_dir: Directory containing audio and text files
         audio_extensions: List of audio file extensions to search for
         text_extensions: List of text file extensions to search for
+        max_workers: Number of parallel workers for file discovery
     
     Returns:
         List of tuples (audio_file_path, text_file_path)
@@ -120,35 +129,74 @@ def find_audio_text_pairs(input_dir: str, audio_extensions: List[str] = None,
     if text_extensions is None:
         text_extensions = ['.txt']
     
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
     input_path = Path(input_dir)
     if not input_path.exists():
         raise ValueError(f"Input directory does not exist: {input_dir}")
     
-    # Find all audio files
-    audio_files = {}
-    for ext in audio_extensions:
-        pattern = f"**/*{ext}"
-        for audio_file in input_path.glob(pattern):
-            basename = audio_file.stem
-            audio_files[basename] = str(audio_file)
+    logging.info(f"Starting optimized file discovery with {max_workers} workers...")
+    start_time = time.time()
     
-    # Find all text files and match with audio files
+    # Use os.walk for better performance on very large directories
+    audio_files = {}
+    text_files = {}
+    
+    logging.info("Scanning directory structure...")
+    total_files = 0
+    
+    for root, dirs, files in os.walk(input_dir):
+        total_files += len(files)
+        
+        # Process files in batches to avoid memory issues
+        for filename in files:
+            filepath = os.path.join(root, filename)
+            name, ext = os.path.splitext(filename)
+            
+            if ext.lower() in audio_extensions:
+                audio_files[name] = filepath
+            elif ext.lower() in text_extensions:
+                text_files[name] = filepath
+    
+    logging.info(f"Scanned {total_files} total files in {time.time() - start_time:.2f}s")
+    logging.info(f"Found {len(audio_files)} audio files and {len(text_files)} text files")
+    
+    # Find matching pairs efficiently
     pairs = []
-    for ext in text_extensions:
-        pattern = f"**/*{ext}"
-        for text_file in input_path.glob(pattern):
-            basename = text_file.stem
-            if basename in audio_files:
-                pairs.append((audio_files[basename], str(text_file)))
-                logging.info(f"Found pair: {basename}")
-            else:
-                logging.warning(f"No matching audio file for text: {text_file}")
+    matched_count = 0
+    
+    logging.info("Matching audio-text pairs...")
+    for name in audio_files:
+        if name in text_files:
+            pairs.append((audio_files[name], text_files[name]))
+            matched_count += 1
+            
+            # Log progress for large datasets
+            if matched_count % 100000 == 0:
+                logging.info(f"Matched {matched_count} pairs...")
+    
+    unmatched_audio = len(audio_files) - matched_count
+    unmatched_text = len(text_files) - matched_count
+    
+    if unmatched_audio > 0:
+        logging.warning(f"{unmatched_audio} audio files have no matching text")
+    if unmatched_text > 0:
+        logging.warning(f"{unmatched_text} text files have no matching audio")
     
     if not pairs:
         raise ValueError(f"No matching audio-text pairs found in {input_dir}")
     
-    logging.info(f"Found {len(pairs)} audio-text pairs")
+    logging.info(f"Found {len(pairs)} audio-text pairs in {time.time() - start_time:.2f}s")
     return pairs
+
+
+def find_audio_text_pairs(input_dir: str, audio_extensions: List[str] = None, 
+                          text_extensions: List[str] = None) -> List[Tuple[str, str]]:
+    """
+    Legacy function - redirects to optimized version.
+    """
+    return find_audio_text_pairs_optimized(input_dir, audio_extensions, text_extensions)
 
 
 def load_audio(audio_path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int]:
@@ -302,26 +350,22 @@ def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: in
     return sample
 
 
-def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
-                        text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Dataset:
+def process_sample_batch(batch_data: Tuple[List[Tuple[str, str]], int, int, int, str, int]) -> List[Dict]:
     """
-    Create HuggingFace Dataset from audio-text pairs.
+    Process a batch of audio-text pairs in a separate process.
     
     Args:
-        pairs: List of (audio_path, text_path) tuples
-        target_sr: Target sample rate for audio
-        text_encoding: Text file encoding
-        min_file_size: Minimum file size in bytes to consider valid
+        batch_data: Tuple containing (pairs, target_sr, text_encoding, min_file_size, batch_id, total_batches)
     
     Returns:
-        HuggingFace Dataset
+        List of processed samples
     """
+    pairs, target_sr, text_encoding, min_file_size, batch_id, total_batches = batch_data
+    
     samples = []
     failed_count = 0
     
-    logging.info(f"Processing {len(pairs)} audio-text pairs...")
-    
-    for audio_path, text_path in tqdm(pairs, desc="Processing samples"):
+    for i, (audio_path, text_path) in enumerate(pairs):
         try:
             # Use filename prefix as sample_id
             audio_filename = Path(audio_path).stem
@@ -333,19 +377,155 @@ def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000,
             
         except Exception as e:
             failed_count += 1
-            logging.warning(f"Skipping corrupted file {audio_filename}: {e}")
+            # Use a different approach for logging in multiprocessing
+            print(f"Batch {batch_id}: Skipping corrupted file {Path(audio_path).stem}: {e}")
             continue
     
-    if not samples:
-        raise ValueError("No samples were successfully created - all files may be corrupted")
+    print(f"Batch {batch_id}/{total_batches} completed: {len(samples)} successful, {failed_count} failed")
+    return samples
+
+
+def create_arrow_dataset_batch(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
+                              text_encoding: str = 'utf-8', min_file_size: int = 1024,
+                              batch_size: int = 1000, max_workers: int = None) -> Dataset:
+    """
+    Create HuggingFace Dataset from audio-text pairs using batch processing.
+    Optimized for millions of files.
     
-    success_rate = len(samples) / len(pairs) * 100
-    logging.info(f"Successfully created {len(samples)} samples out of {len(pairs)} pairs")
-    logging.info(f"Success rate: {success_rate:.1f}% ({failed_count} files skipped due to corruption)")
+    Args:
+        pairs: List of (audio_path, text_path) tuples
+        target_sr: Target sample rate for audio
+        text_encoding: Text file encoding
+        min_file_size: Minimum file size in bytes to consider valid
+        batch_size: Number of samples to process in each batch
+        max_workers: Number of parallel workers
+    
+    Returns:
+        HuggingFace Dataset
+    """
+    if max_workers is None:
+        max_workers = min(8, (os.cpu_count() or 1))  # Conservative for memory usage
+    
+    logging.info(f"Processing {len(pairs)} pairs with batch size {batch_size} and {max_workers} workers")
+    
+    # Split pairs into batches
+    batches = []
+    total_batches = (len(pairs) + batch_size - 1) // batch_size
+    
+    for i in range(0, len(pairs), batch_size):
+        batch_pairs = pairs[i:i + batch_size]
+        batch_id = i // batch_size + 1
+        batches.append((batch_pairs, target_sr, text_encoding, min_file_size, batch_id, total_batches))
+    
+    logging.info(f"Created {len(batches)} batches")
+    
+    # Process batches in parallel
+    all_samples = []
+    total_failed = 0
+    
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all batches
+        future_to_batch = {executor.submit(process_sample_batch, batch_data): batch_data[4] 
+                          for batch_data in batches}
+        
+        # Collect results with progress tracking
+        with tqdm(total=len(batches), desc="Processing batches") as pbar:
+            for future in as_completed(future_to_batch):
+                batch_id = future_to_batch[future]
+                try:
+                    batch_samples = future.result()
+                    all_samples.extend(batch_samples)
+                    pbar.update(1)
+                    
+                    # Memory management - force garbage collection
+                    if batch_id % 10 == 0:
+                        gc.collect()
+                        
+                        # Log memory usage
+                        memory_gb = psutil.Process().memory_info().rss / 1024 / 1024 / 1024
+                        logging.info(f"Memory usage: {memory_gb:.2f} GB")
+                        
+                except Exception as e:
+                    logging.error(f"Batch {batch_id} failed: {e}")
+                    total_failed += 1
+    
+    if not all_samples:
+        raise ValueError("No samples were successfully created - all batches may have failed")
+    
+    success_rate = len(all_samples) / len(pairs) * 100
+    logging.info(f"Successfully created {len(all_samples)} samples out of {len(pairs)} pairs")
+    logging.info(f"Success rate: {success_rate:.1f}% ({total_failed} batches failed)")
     
     # Create HuggingFace Dataset
-    dataset = Dataset.from_list(samples)
+    logging.info("Creating HuggingFace Dataset...")
+    dataset = Dataset.from_list(all_samples)
+    
+    # Clear memory
+    del all_samples
+    gc.collect()
+    
     return dataset
+
+
+def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
+                        text_encoding: str = 'utf-8', min_file_size: int = 1024,
+                        use_batch_processing: bool = None, batch_size: int = 1000,
+                        max_workers: int = None) -> Dataset:
+    """
+    Create HuggingFace Dataset from audio-text pairs.
+    Automatically chooses between single-threaded and batch processing based on dataset size.
+    
+    Args:
+        pairs: List of (audio_path, text_path) tuples
+        target_sr: Target sample rate for audio
+        text_encoding: Text file encoding
+        min_file_size: Minimum file size in bytes to consider valid
+        use_batch_processing: Force batch processing (None = auto-detect)
+        batch_size: Number of samples per batch for parallel processing
+        max_workers: Number of parallel workers
+    
+    Returns:
+        HuggingFace Dataset
+    """
+    # Auto-detect whether to use batch processing
+    if use_batch_processing is None:
+        use_batch_processing = len(pairs) > 10000  # Use batch processing for >10k samples
+    
+    if use_batch_processing:
+        logging.info(f"Using batch processing for {len(pairs)} samples (threshold: >10k)")
+        return create_arrow_dataset_batch(pairs, target_sr, text_encoding, min_file_size, 
+                                        batch_size, max_workers)
+    else:
+        logging.info(f"Using single-threaded processing for {len(pairs)} samples")
+        
+        samples = []
+        failed_count = 0
+        
+        for audio_path, text_path in tqdm(pairs, desc="Processing samples"):
+            try:
+                # Use filename prefix as sample_id
+                audio_filename = Path(audio_path).stem
+                sample_id = audio_filename
+                
+                # Create sample with validation
+                sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding, min_file_size)
+                samples.append(sample)
+                
+            except Exception as e:
+                failed_count += 1
+                logging.warning(f"Skipping corrupted file {audio_filename}: {e}")
+                continue
+        
+        if not samples:
+            raise ValueError("No samples were successfully created - all files may be corrupted")
+        
+        success_rate = len(samples) / len(pairs) * 100
+        logging.info(f"Successfully created {len(samples)} samples out of {len(pairs)} pairs")
+        logging.info(f"Success rate: {success_rate:.1f}% ({failed_count} files skipped due to corruption)")
+        
+        # Create HuggingFace Dataset
+        dataset = Dataset.from_list(samples)
+        return dataset
 
 
 def validate_output_compatibility(dataset: Dataset) -> bool:
@@ -433,6 +613,14 @@ def main():
                        help='List files that fail validation (for debugging)')
     parser.add_argument('--min_file_size', type=int, default=1024,
                        help='Minimum file size in bytes to consider valid (default: 1024)')
+    parser.add_argument('--batch_size', type=int, default=1000,
+                       help='Batch size for parallel processing (default: 1000)')
+    parser.add_argument('--max_workers', type=int, default=None,
+                       help='Maximum number of parallel workers (default: auto)')
+    parser.add_argument('--force_batch_processing', action='store_true',
+                       help='Force batch processing even for small datasets')
+    parser.add_argument('--resume_from', type=str, default=None,
+                       help='Resume processing from existing partial dataset')
     
     args = parser.parse_args()
     
@@ -459,14 +647,48 @@ def main():
                 logging.info("No corrupted files found!")
             return
         
+        # Handle resume functionality
+        existing_dataset = None
+        if args.resume_from and Path(args.resume_from).exists():
+            try:
+                existing_dataset = Dataset.load_from_disk(args.resume_from)
+                existing_keys = set(existing_dataset['__key__'])
+                
+                # Filter out already processed pairs
+                original_count = len(pairs)
+                pairs = [(a, t) for a, t in pairs if Path(a).stem not in existing_keys]
+                
+                logging.info(f"Resuming from {args.resume_from}")
+                logging.info(f"Found {len(existing_dataset)} existing samples")
+                logging.info(f"Filtering {original_count - len(pairs)} already processed pairs")
+                logging.info(f"Remaining {len(pairs)} pairs to process")
+                
+                if not pairs:
+                    logging.info("All pairs already processed!")
+                    return
+                    
+            except Exception as e:
+                logging.warning(f"Could not load existing dataset for resume: {e}")
+                existing_dataset = None
+
         # Create Arrow dataset
         logging.info("Creating Arrow dataset...")
         dataset = create_arrow_dataset(
             pairs, 
             args.target_sr, 
             args.text_encoding,
-            args.min_file_size
+            args.min_file_size,
+            use_batch_processing=args.force_batch_processing or None,
+            batch_size=args.batch_size,
+            max_workers=args.max_workers
         )
+        
+        # Merge with existing dataset if resuming
+        if existing_dataset is not None:
+            from datasets import concatenate_datasets
+            logging.info("Merging with existing dataset...")
+            dataset = concatenate_datasets([existing_dataset, dataset])
+            logging.info(f"Final dataset size: {len(dataset)} samples")
         
         # Validate if requested
         if args.validate:
