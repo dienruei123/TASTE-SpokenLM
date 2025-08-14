@@ -103,17 +103,35 @@ def load_audio(audio_path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int
         
         # Convert to numpy and squeeze
         audio_array = waveform.squeeze().numpy().astype(np.float32)
+        
+        # Ensure it's a proper numpy array
+        if not isinstance(audio_array, np.ndarray):
+            raise ValueError(f"Failed to convert to numpy array for {audio_path}")
+        
+        # Check for empty or invalid audio
+        if audio_array.size == 0:
+            raise ValueError(f"Empty audio array for {audio_path}")
+            
         return audio_array, target_sr
         
     except Exception as e:
         logging.warning(f"Torchaudio failed for {audio_path}, trying librosa: {e}")
         try:
-            # Fallback to librosa
-            audio_array, orig_sr = librosa.load(audio_path, sr=target_sr, mono=True)
+            # Fallback to librosa with more robust error handling
+            audio_array, loaded_sr = librosa.load(audio_path, sr=target_sr, mono=True)
+            
+            # Ensure it's a proper numpy array
+            if not isinstance(audio_array, np.ndarray):
+                raise ValueError(f"Librosa failed to return numpy array for {audio_path}")
+            
+            # Check for empty or invalid audio
+            if audio_array.size == 0:
+                raise ValueError(f"Empty audio array from librosa for {audio_path}")
+                
             return audio_array.astype(np.float32), target_sr
         except Exception as e:
-            logging.error(f"Failed to load audio {audio_path}: {e}")
-            raise
+            logging.error(f"Both torchaudio and librosa failed for {audio_path}: {e}")
+            raise ValueError(f"Could not load audio file {audio_path}: {e}")
 
 
 def load_text(text_path: str, encoding: str = 'utf-8') -> str:
@@ -187,7 +205,7 @@ def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: in
 
 
 def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
-                        text_encoding: str = 'utf-8', key_prefix: str = "sample") -> Dataset:
+                        text_encoding: str = 'utf-8') -> Dataset:
     """
     Create HuggingFace Dataset from audio-text pairs.
     
@@ -195,16 +213,17 @@ def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000,
         pairs: List of (audio_path, text_path) tuples
         target_sr: Target sample rate for audio
         text_encoding: Text file encoding
-        key_prefix: Prefix for generating sample keys
     
     Returns:
         HuggingFace Dataset
     """
     samples = []
     
-    for i, (audio_path, text_path) in enumerate(tqdm(pairs, desc="Processing samples")):
+    for audio_path, text_path in tqdm(pairs, desc="Processing samples"):
         try:
-            sample_id = f"{key_prefix}_{i:06d}"
+            # Use filename prefix as sample_id
+            audio_filename = Path(audio_path).stem
+            sample_id = audio_filename
             sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding)
             samples.append(sample)
             
@@ -308,8 +327,7 @@ def main():
         dataset = create_arrow_dataset(
             pairs, 
             args.target_sr, 
-            args.text_encoding, 
-            args.key_prefix
+            args.text_encoding
         )
         
         # Validate if requested
