@@ -218,8 +218,218 @@ detokenize_output: dict = taste_detokenize(
   - `modeling_taste.py:1730-1735` → `streaming_generate()` 核心邏輯  
   - `modules_taste/inference_audio.py:91-100` → `taste_detokenize()` 基礎
 
-### 技術考量：
-1. **效能優化**：保持與批次模式相近的效能
-2. **記憶體管理**：避免長時間對話的記憶體洩漏
-3. **錯誤處理**：支援中途中斷和恢復
-4. **向後相容**：不影響現有批次模式功能
+## FAQ
+
+### Q1: 
+
+`input_segments` in `streaming_generate` 怎麼轉換成可以讓 `TasteSpokenLM` 可以當作 conditional prompt sequence?
+
+### A1:
+
+step 1: 定義 special tokens
+
+```python
+# Special tokens mapping
+SEGMENT_START = "<|reserved_special_token_50|>"  # segment_start_token
+SEGMENT_END = "<|reserved_special_token_51|>"    # segment_end_token  
+SYS_ROLE = "<|reserved_special_token_52|>"       # sys_role_token
+USER_ROLE = "<|reserved_special_token_53|>"      # user_role_token
+ASSISTANT_ROLE = "<|reserved_special_token_54|>" # assistant_role_token
+
+# Get token IDs from llm_tokenizer
+special_token_ids = {
+    'segment_start': llm_tokenizer.convert_tokens_to_ids(SEGMENT_START),
+    'segment_end': llm_tokenizer.convert_tokens_to_ids(SEGMENT_END),
+    'sys_role': llm_tokenizer.convert_tokens_to_ids(SYS_ROLE),
+    'user_role': llm_tokenizer.convert_tokens_to_ids(USER_ROLE),
+    'assistant_role': llm_tokenizer.convert_tokens_to_ids(ASSISTANT_ROLE),
+}
+```
+
+step 2: 構建 conditional prompt (pseudo code)
+
+```python
+def build_conditional_prompt(input_segments, special_token_ids):
+    conditional_text_ids = []
+    conditional_taste_ids = []
+    
+    for segment in input_segments:
+        # 添加 segment 開始標記
+        conditional_text_ids.append(special_token_ids['segment_start'])
+        
+        # 添加角色標記
+        role_token_id = special_token_ids[f'{segment.role}_role']
+        conditional_text_ids.append(role_token_id)
+        
+        # 添加內容
+        conditional_text_ids.extend(segment.text_ids.squeeze(0))  # remove batch dim
+        
+        # 添加 segment 結束標記  
+        conditional_text_ids.append(special_token_ids['segment_end'])
+        
+        # 處理 TASTE tokens (如果是 audio modality)
+        if segment.modality == 'audio' and segment.taste_ids is not None:
+            # TASTE tokens 需要與 text tokens 對齊
+            # 在 segment_start, role_token, segment_end 位置使用 pad_audio_unit_embed
+            pad_taste_indices = torch.full((3, VQ_DIM), -1, dtype=torch.long)  # [-1,-1,-1,-1] 表示使用 pad_audio_unit_embed
+            segment_taste = segment.taste_ids.squeeze(0)  # remove batch dim
+            
+            conditional_taste_ids.extend([
+                pad_taste_indices[0],    # segment_start 對應的 taste (使用 pad_audio_unit_embed)
+                pad_taste_indices[1],    # role_token 對應的 taste (使用 pad_audio_unit_embed)
+                segment_taste,           # 實際內容的 taste tokens
+                pad_taste_indices[2]     # segment_end 對應的 taste (使用 pad_audio_unit_embed)
+            ])
+        else:
+            # text-only segments: 使用 [-1,-1,-1,-1] 表示採用 pad_audio_unit_embed
+            text_length = len(segment.text_ids.squeeze(0)) + 3  # +3 for special tokens
+            pad_taste_indices = torch.full((text_length, VQ_DIM), -1, dtype=torch.long)
+            conditional_taste_ids.extend(pad_taste_indices)
+    
+    # 添加最後一個 segment_start (為下一輪生成做準備)
+    conditional_text_ids.append(special_token_ids['segment_start'])
+    
+    # 轉換為 tensors
+    prompt_text_ids = torch.tensor(conditional_text_ids).unsqueeze(0)  # add batch dim
+    prompt_taste_ids = torch.stack(conditional_taste_ids).unsqueeze(0) if conditional_taste_ids else None
+    
+    return prompt_text_ids, prompt_taste_ids
+```
+
+**特別注意**：以上這些步驟應該要整合進去 `TasteProcessor` 中，開放函數為 `TasteProcessor().build_conditional_prompt`。
+
+step 3: 對話狀態判斷與生成 (基於現有程式碼)
+
+```python
+def streaming_generate(model, processor, input_segments, **gen_kwargs):
+    # 基於 TasteSpokenLM.generate() 的 streaming 版本
+    
+    # Step 3.1: 準備初始 prompt (使用 step 2 的結果)
+    prompt_text_ids, prompt_taste_ids = build_conditional_prompt(input_segments, special_token_ids)
+    
+    # Step 3.2: 設置 TasteSampler (重用現有組件)
+    model.spoken_lm.register_taste_sampler(
+        llm_tokenizer=processor.llm_tokenizer,
+        **gen_kwargs  # text_top_p, taste_top_p, text_temperature, etc.
+    )
+    
+    # Step 3.3: 準備 LLM 組件 (重用 TasteSpokenLM.generate 邏輯)
+    if model.spoken_lm._use_lora:
+        base = model.spoken_lm.language_model.base_model.model
+    else:
+        base = model.spoken_lm.language_model
+    
+    llm_embed_tokens = base.model.embed_tokens
+    llm_backbone = base.model  
+    lm_head = base.lm_head
+    vq_module = model.audio_tower.vq.rvq
+    
+    # Step 3.4: 從 prompt 構建初始 inputs_embeds
+    inputs_embeds = model.spoken_lm._build_inputs_embeds_from_prompt(
+        prompt_text_ids, prompt_taste_ids, llm_embed_tokens, vq_module
+    )
+    input_ids = prompt_text_ids
+    
+    # Step 3.5: Auto-regressive generation loop (重用 TasteSampler 邏輯)
+    model.spoken_lm.taste_sampler.reset(
+        extra_words=gen_kwargs.get('extra_words', 32),
+        has_prefix=True,  # 我們有 conversation history
+        stop_id=special_token_ids.get('segment_end')  # 當遇到 segment_end 時停止
+    )
+    
+    while True:
+        # Step 3.6: LLM forward pass (重用現有組件)
+        llm_outputs = llm_backbone(
+            inputs_embeds=inputs_embeds,
+            attention_mask=None,
+            output_hidden_states=True,
+            return_dict='pt'
+        )
+        
+        text_logits = lm_head(llm_outputs.last_hidden_state)
+        taste_logits, _ = model.spoken_lm.extract_for_bridge_out_llm(llm_outputs, vq_module)
+        
+        # Step 3.7: 使用 TasteSampler 進行採樣 (重用現有邏輯)
+        text_id, taste_ids, action, taste_action = \
+            model.spoken_lm.taste_sampler.update(text_logits, taste_logits, input_ids=input_ids)
+        
+        # Step 3.8: 對話狀態判斷 (基於採樣結果和 special tokens)
+        input_ids = F.pad(input_ids, (0, 1), 'constant', text_id)
+        
+        # 檢查是否為對話控制 token
+        if text_id == special_token_ids['segment_end']:
+            completion_reason = 'segment_finished'
+            is_complete = True
+        elif text_id == special_token_ids['user_role']:
+            completion_reason = 'user_wants_continue' 
+            is_complete = True
+        elif text_id == special_token_ids['assistant_role']:
+            completion_reason = 'assistant_starts_speaking'
+            is_complete = False  # 繼續生成
+        elif action == 'terminate':
+            completion_reason = 'natural_end'
+            is_complete = True
+        else:
+            completion_reason = 'generating'
+            is_complete = False
+        
+        # Step 3.9: 更新 embeddings (重用 TasteSpokenLM 的融合邏輯)
+        if taste_action == 'sample':
+            # 使用生成的 TASTE tokens
+            last_asr_embed = model.spoken_lm.encode_audio(taste_ids, vq_module)
+        elif taste_action.startswith('use_prefix'):
+            # 使用 prefix 的 TASTE tokens (如果有的話)
+            last_asr_embed = get_prefix_audio_embed()  # 實作細節依據 conditional prompt
+        else:
+            # 使用 pad_audio_unit_embed (text-only tokens)
+            last_asr_embed = model.spoken_lm.pad_audio_unit_embed.reshape(1, 1, -1)
+        
+        new_inputs_embeds = model.spoken_lm.fuse_for_bridge_in_llm(
+            llm_embed_tokens.weight[text_id].reshape(1, 1, -1),
+            last_asr_embed
+        )
+        
+        inputs_embeds = torch.concat([inputs_embeds, new_inputs_embeds], dim=1)
+        
+        # Step 3.10: Yield streaming result (Iterator pattern)
+        current_segment = TASTESegment(
+            role='assistant',
+            modality='audio' if taste_action == 'sample' else 'text',
+            text_ids=torch.tensor([text_id]).unsqueeze(0),
+            taste_ids=taste_ids if taste_action == 'sample' else None
+        )
+        
+        yield {
+            'is_complete': is_complete,
+            'completion_reason': completion_reason,
+            'segment': current_segment,
+        }
+        
+        # Step 3.11: 終止條件檢查
+        if is_complete:
+            break
+
+def _build_inputs_embeds_from_prompt(self, prompt_text_ids, prompt_taste_ids, llm_embed_tokens, vq_module):
+    """從 conditional prompt 構建初始 inputs_embeds (新增的輔助方法)"""
+    inputs_embeds_list = []
+    
+    for i, text_id in enumerate(prompt_text_ids.squeeze(0)):
+        text_embed = llm_embed_tokens.weight[text_id].reshape(1, 1, -1)
+        
+        if prompt_taste_ids is not None:
+            taste_indices = prompt_taste_ids[0, i]  # shape: (VQ_DIM,)
+            
+            if torch.all(taste_indices == -1):  # 使用 pad_audio_unit_embed
+                audio_embed = self.pad_audio_unit_embed.reshape(1, 1, -1)
+            else:  # 使用實際的 TASTE tokens
+                audio_embed = self.encode_audio(taste_indices.unsqueeze(0).unsqueeze(0), vq_module)
+        else:
+            audio_embed = self.pad_audio_unit_embed.reshape(1, 1, -1)
+        
+        fused_embed = self.fuse_for_bridge_in_llm(text_embed, audio_embed)
+        inputs_embeds_list.append(fused_embed)
+    
+    return torch.concat(inputs_embeds_list, dim=1)
+```
+
+**特別注意**：以上這些步驟應該要整合進去 `TasteSpokenLM` 中，開放函數為 `TasteSpokenLM().streaming_generate`。
