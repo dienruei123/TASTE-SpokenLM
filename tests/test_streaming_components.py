@@ -320,7 +320,12 @@ class TestTasteDetokenize:
         model.speech_decoder.llm_decoder.return_value = torch.randn(1, 1000, device=DEVICE)
         
         model.speech_decoder.sampling_ids = Mock()
-        model.speech_decoder.sampling_ids.side_effect = [100, 101, 102, 1000]  # EOS token
+        model.speech_decoder.sampling_ids.side_effect = [
+            torch.tensor(100, device=DEVICE), 
+            torch.tensor(101, device=DEVICE), 
+            torch.tensor(102, device=DEVICE), 
+            torch.tensor(1000, device=DEVICE)  # EOS token
+        ]
         
         model.speech_decoder.speech_token_size = 1000
         model.speech_decoder.speech_embedding = Mock()
