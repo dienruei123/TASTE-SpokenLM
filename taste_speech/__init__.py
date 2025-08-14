@@ -18,6 +18,9 @@ from .processing_taste import (
 )
 from .modules_taste.inference_audio import VoiceGenerator
 
+# Streaming support module
+from . import streaming
+
 AutoConfig.register('taste', TasteConfig)
 AutoModelForCausalLM.register(TasteConfig, TasteForCausalLM)
 AutoProcessor.register(TasteConfig, TasteProcessor)
