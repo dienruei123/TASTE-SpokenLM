@@ -149,57 +149,30 @@ def test_taste_imports():
 
 
 def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer_path, sample_idx=0):
-    """Test processing a single sample with TASTE pipeline."""
+    """Test processing a single sample with TASTE pipeline - STANDARD VERSION."""
     print(f"\n" + "=" * 50)
     print(f"TESTING SINGLE SAMPLE PROCESSING (sample {sample_idx})")
     print("=" * 50)
     
     try:
-        # Import required modules
         import torch
-        from transformers import AutoTokenizer
-        
-        # Try to import WhisperProcessor with fallback
-        try:
-            from transformers import WhisperProcessor
-        except ImportError:
-            print("✗ WhisperProcessor not available. Trying alternative import...")
-            try:
-                from transformers import WhisperFeatureExtractor, WhisperTokenizer
-                # Create a simple processor-like object
-                class SimpleWhisperProcessor:
-                    def __init__(self, model_name):
-                        self.feature_extractor = WhisperFeatureExtractor.from_pretrained(model_name)
-                        self.tokenizer = WhisperTokenizer.from_pretrained(model_name)
-                
-                def WhisperProcessor_from_pretrained(model_name):
-                    return SimpleWhisperProcessor(model_name)
-                WhisperProcessor = type('WhisperProcessor', (), {'from_pretrained': staticmethod(WhisperProcessor_from_pretrained)})
-            except ImportError as e:
-                print(f"✗ Cannot create WhisperProcessor alternative: {e}")
-                return False
+        from transformers import AutoTokenizer, WhisperProcessor
         from taste_speech.data.dataset import process_one_sample
         from taste_speech.modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
         
-        # Get sample
+        # Check sample bounds
         if sample_idx >= len(dataset):
-            print(f"✗ Sample index {sample_idx} out of range (dataset size: {len(dataset)})")
+            print(f"✗ Sample index {sample_idx} out of range (dataset has {len(dataset)} samples)")
             return False
         
         sample = dataset[sample_idx]
-        print(f"✓ Sample {sample_idx} loaded")
-        print(f"  - Audio length: {len(sample['mp3']['array'])}")
-        print(f"  - Text: {sample['json']['text'][:50]}...")
-        print(f"  - S3 token length: {len(sample['s3_token'])}")
-        print(f"  - Speaker embedding length: {len(sample['spk_emb'])}")
+        print(f"✓ Testing sample {sample_idx}")
+        print(f"  - Audio length: {len(sample['mp3']['array'])} samples")
+        print(f"  - Text length: {len(sample['json']['text'])} characters")
+        print(f"  - Text: {sample['json']['text'][:100]}...")
         
-        # Check for empty required fields
-        if len(sample['s3_token']) == 0 or len(sample['spk_emb']) == 0:
-            print("⚠ WARNING: s3_token or spk_emb is empty. This may cause processing to fail.")
-            print("  You may need to populate these fields for full TASTE compatibility.")
-        
-        # Initialize processors
-        print("✓ Loading processors...")
+        # Load processors
+        print("Loading processors...")
         whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_path)
         llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_path)
         whisper_feature_extractor = WhisperFrontend(
@@ -207,10 +180,10 @@ def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer
             do_pad_trim=True,
             permute=True,
         )
-        print("✓ Processors loaded successfully")
+        print("✓ All processors loaded")
         
-        # Process sample
-        print("✓ Processing sample...")
+        # Process the sample
+        print("Processing sample...")
         resampler_dict = {}
         processed_sample = process_one_sample(
             sample,
@@ -220,13 +193,84 @@ def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer
             whisper_feature_extractor=whisper_feature_extractor
         )
         
-        print("✓ Sample processing successful!")
-        print("\nProcessed sample structure:")
+        # Validate processed sample
+        print(f"\n✓ Sample processed successfully!")
+        print(f"  - Generated keys: {list(processed_sample.keys())}")
+        
         for key, value in processed_sample.items():
-            if hasattr(value, 'shape'):  # torch.Tensor or numpy array
-                print(f"  {key}: {type(value).__name__} shape {value.shape}, dtype {value.dtype}")
+            if hasattr(value, 'shape'):
+                print(f"  - {key}: {value.shape} ({value.dtype})")
+            elif hasattr(value, '__len__'):
+                print(f"  - {key}: length {len(value)} ({type(value)})")
             else:
-                print(f"  {key}: {type(value).__name__} - {value}")
+                print(f"  - {key}: {type(value)}")
+        
+        print("\n✓ Single sample processing PASSED")
+        return True
+        
+    except Exception as e:
+        print(f"✗ Single sample processing FAILED: {e}")
+        import traceback
+        print("Detailed error:")
+        traceback.print_exc()
+        return False
+
+
+def test_single_sample_processing_fast(dataset, whisper_processor_path, llm_tokenizer_path, sample_idx=0):
+    """Test processing a single sample with TASTE pipeline - OPTIMIZED VERSION."""
+    print(f"\n" + "=" * 50)
+    print(f"TESTING SINGLE SAMPLE PROCESSING (FAST - sample {sample_idx})")
+    print("=" * 50)
+    
+    try:
+        import time
+        start_time = time.time()
+        
+        # SPEEDUP 1: Fast imports with minimal error handling  
+        import torch
+        from transformers import AutoTokenizer, WhisperProcessor
+        from taste_speech.data.dataset import process_one_sample
+        from taste_speech.modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
+        
+        # SPEEDUP 2: Quick sample validation
+        if sample_idx >= len(dataset):
+            print(f"✗ Sample index {sample_idx} out of range")
+            return False
+        
+        sample = dataset[sample_idx]
+        print(f"⚡ Sample {sample_idx} loaded - Audio: {len(sample['mp3']['array'])}, Text: {len(sample['json']['text'])} chars")
+        
+        # SPEEDUP 3: Fast processor loading with minimal output
+        load_start = time.time()
+        whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_path)
+        llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_path)
+        whisper_feature_extractor = WhisperFrontend(
+            whisper_model="large-v3",
+            do_pad_trim=True,
+            permute=True,
+        )
+        load_time = time.time() - load_start
+        print(f"⚡ Processors loaded in {load_time:.2f}s")
+        
+        # SPEEDUP 4: Fast processing
+        process_start = time.time()
+        resampler_dict = {}
+        processed_sample = process_one_sample(
+            sample,
+            resampler_dict=resampler_dict,
+            whisper_processor=whisper_processor,
+            llm_tokenizer=llm_tokenizer,
+            whisper_feature_extractor=whisper_feature_extractor
+        )
+        process_time = time.time() - process_start
+        
+        # SPEEDUP 5: Minimal output - just tensor counts and shapes
+        tensor_count = sum(1 for v in processed_sample.values() if hasattr(v, 'shape'))
+        total_time = time.time() - start_time
+        
+        print(f"⚡ FAST processing completed!")
+        print(f"  - Load time: {load_time:.2f}s, Process time: {process_time:.2f}s, Total: {total_time:.2f}s")
+        print(f"  - Generated {tensor_count} tensors successfully")
         
         return True
         
@@ -239,88 +283,189 @@ def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer
 
 
 def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None):
-    """Test full dataset processing with TASTE pipeline."""
+    """Test full dataset processing with TASTE pipeline - STANDARD VERSION."""
     print(f"\n" + "=" * 50)
     print("TESTING FULL DATASET PROCESSING")
     print("=" * 50)
     
     try:
-        # Import required modules
         from taste_speech.data.dataset import load_from_arrows, REQUIRED_COLUMNS
         from pathlib import Path
-        
-        # Check if WhisperProcessor is available
-        try:
-            from transformers import WhisperProcessor
-        except ImportError:
-            print("⚠ WARNING: WhisperProcessor not available, using fallback approach")
-            # This will be handled by the load_from_arrows function
+        import os
         
         # Determine arrow files to process
         arrow_path_obj = Path(arrow_path)
         
         if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
-            # Single .arrow file
             arrow_files = [arrow_path]
             print(f"✓ Processing single .arrow file: {arrow_path}")
         elif arrow_path_obj.is_dir():
-            # Directory - find all .arrow files
             arrow_files = [str(f) for f in arrow_path_obj.glob("*.arrow")]
             if not arrow_files:
-                # Check if it's a dataset directory - convert it to arrow file list
                 try:
                     from datasets import Dataset
                     dataset = Dataset.load_from_disk(arrow_path)
-                    # Create a temporary arrow file for testing
                     temp_arrow = arrow_path_obj / "temp_test.arrow" 
                     dataset.save_to_disk(str(temp_arrow))
                     arrow_files = [str(temp_arrow)]
-                    print(f"✓ Converted dataset directory to temporary .arrow file")
+                    print(f"✓ Converted dataset directory to temporary file")
                 except:
                     raise ValueError(f"No .arrow files found in directory: {arrow_path}")
             else:
-                print(f"✓ Found {len(arrow_files)} .arrow files in directory")
+                print(f"✓ Found {len(arrow_files)} .arrow files")
         else:
             raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
         
-        # Process dataset
-        print("✓ Loading dataset with TASTE processing...")
+        # Use moderate parallelization for standard processing
+        max_workers = min(16, os.cpu_count())
+        print(f"✓ Using {max_workers} parallel workers")
         
+        # Process dataset
+        print("Loading and processing dataset...")
         processed_dataset = load_from_arrows(
             arrow_fpath_list=arrow_files,
             whisper_processor_fpath=whisper_processor_path,
             llm_tokenizer_fpath=llm_tokenizer_path,
             streaming=False,
-            num_proc=1  # Single process for testing stability
+            num_proc=max_workers
         )
         
-        print(f"✓ Dataset processed successfully!")
-        print(f"  - Original dataset: {arrow_path}")
-        print(f"  - Processed length: {len(processed_dataset)}")
-        print(f"  - Processed columns: {processed_dataset.column_names}")
+        print(f"✓ Dataset processed successfully")
+        print(f"  - Original files: {len(arrow_files)}")
+        print(f"  - Processed samples: {len(processed_dataset):,}")
+        print(f"  - Columns: {processed_dataset.column_names}")
         
         # Validate required columns
         missing_columns = [col for col in REQUIRED_COLUMNS if col not in processed_dataset.column_names]
         if missing_columns:
             print(f"✗ Missing required columns: {missing_columns}")
             return False
-        
         print("✓ All required columns present")
         
-        # Test a few samples
-        test_samples = min(max_samples or 3, len(processed_dataset))
-        print(f"\nTesting first {test_samples} processed samples:")
+        # Test some samples
+        dataset_size = len(processed_dataset)
+        if max_samples is None:
+            max_samples = min(5, dataset_size)  # Test up to 5 samples by default
+        else:
+            max_samples = min(max_samples, dataset_size)
         
-        for i in range(test_samples):
-            sample = processed_dataset[i]
-            print(f"\nSample {i}:")
+        print(f"\n✓ Testing {max_samples} samples from dataset...")
+        
+        for i in range(max_samples):
+            sample_idx = i if i < dataset_size else 0  # Fallback to first sample if out of range
+            sample = processed_dataset[sample_idx]
+            
+            print(f"\n  Sample {sample_idx}:")
             for key, value in sample.items():
-                if hasattr(value, 'shape'):  # torch.Tensor or numpy array
-                    print(f"  {key}: {type(value).__name__} shape {value.shape}")
+                if hasattr(value, 'shape'):
+                    print(f"    - {key}: {value.shape} ({value.dtype})")
+                elif hasattr(value, '__len__'):
+                    print(f"    - {key}: length {len(value)} ({type(value)})")
                 else:
-                    print(f"  {key}: {type(value).__name__}")
+                    print(f"    - {key}: {type(value)}")
         
-        print("\n✓ Full dataset processing PASSED")
+        print(f"\n✓ Full dataset processing PASSED")
+        return True
+        
+    except Exception as e:
+        print(f"✗ Full dataset processing FAILED: {e}")
+        import traceback
+        print("Detailed error:")
+        traceback.print_exc()
+        return False
+
+
+def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None):
+    """Test full dataset processing with TASTE pipeline - OPTIMIZED VERSION."""
+    print(f"\n" + "=" * 50)
+    print("TESTING FULL DATASET PROCESSING (FAST)")
+    print("=" * 50)
+    
+    try:
+        import os
+        import time
+        from taste_speech.data.dataset import load_from_arrows, REQUIRED_COLUMNS
+        from pathlib import Path
+        
+        start_time = time.time()
+        
+        # Determine arrow files to process
+        arrow_path_obj = Path(arrow_path)
+        
+        if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
+            arrow_files = [arrow_path]
+            print(f"⚡ Processing single .arrow file")
+        elif arrow_path_obj.is_dir():
+            arrow_files = [str(f) for f in arrow_path_obj.glob("*.arrow")]
+            if not arrow_files:
+                try:
+                    from datasets import Dataset
+                    dataset = Dataset.load_from_disk(arrow_path)
+                    temp_arrow = arrow_path_obj / "temp_test.arrow" 
+                    dataset.save_to_disk(str(temp_arrow))
+                    arrow_files = [str(temp_arrow)]
+                    print(f"⚡ Converted dataset directory to temporary file")
+                except:
+                    raise ValueError(f"No .arrow files found in directory: {arrow_path}")
+            else:
+                print(f"⚡ Found {len(arrow_files)} .arrow files")
+        else:
+            raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
+        
+        # SPEEDUP 1: Use maximum parallel processing
+        max_workers = min(64, os.cpu_count() * 2)  # Aggressive parallelization
+        print(f"⚡ Using {max_workers} parallel workers for maximum speed")
+        
+        # SPEEDUP 2: Process dataset with optimized settings
+        processed_dataset = load_from_arrows(
+            arrow_fpath_list=arrow_files,
+            whisper_processor_fpath=whisper_processor_path,
+            llm_tokenizer_fpath=llm_tokenizer_path,
+            streaming=False,
+            num_proc=max_workers  # Maximum parallelization instead of 1
+        )
+        
+        processing_time = time.time() - start_time
+        print(f"⚡ Dataset processed in {processing_time:.2f}s!")
+        print(f"  - Processed length: {len(processed_dataset):,}")
+        print(f"  - Processing rate: {len(processed_dataset)/processing_time:.1f} samples/sec")
+        
+        # SPEEDUP 3: Quick column validation (no detailed checking)
+        missing_columns = [col for col in REQUIRED_COLUMNS if col not in processed_dataset.column_names]
+        if missing_columns:
+            print(f"✗ Missing required columns: {missing_columns}")
+            return False
+        print("⚡ All required columns present")
+        
+        # SPEEDUP 4: Smart sampling - test only representative samples
+        dataset_size = len(processed_dataset)
+        if max_samples is None:
+            # Smart sampling: test fewer samples for large datasets
+            if dataset_size > 1000:
+                test_samples = 3
+            elif dataset_size > 100:
+                test_samples = 5
+            else:
+                test_samples = min(3, dataset_size)
+        else:
+            test_samples = min(max_samples, dataset_size)
+        
+        print(f"⚡ Testing {test_samples} representative samples (out of {dataset_size:,})")
+        
+        # SPEEDUP 5: Minimal output - only essential info
+        sample_indices = [0, dataset_size//2, dataset_size-1] if dataset_size >= 3 else [0]
+        sample_indices = sample_indices[:test_samples]
+        
+        for idx in sample_indices:
+            sample = processed_dataset[idx]
+            # Only check tensor shapes, not detailed content
+            tensor_info = []
+            for key, value in sample.items():
+                if hasattr(value, 'shape'):
+                    tensor_info.append(f"{key}: {value.shape}")
+            print(f"  Sample {idx}: {len(tensor_info)} tensors OK")
+        
+        print(f"⚡ FAST processing completed in {processing_time:.2f}s - {len(processed_dataset)/processing_time:.1f} samples/sec")
         return True
         
     except Exception as e:
@@ -344,6 +489,8 @@ def main():
                        help='Sample index to test for single sample processing (default: 0)')
     parser.add_argument('--max_samples', type=int, default=3,
                        help='Maximum number of samples to test in full processing (default: 3)')
+    parser.add_argument('--fast', action='store_true',
+                       help='Use fast/optimized testing mode for better performance')
     
     args = parser.parse_args()
     
@@ -375,13 +522,23 @@ def main():
             print("⚠ Some TASTE modules are missing. TASTE tests may fail.")
             print("Make sure you have all required dependencies installed.")
         
+        # Choose testing functions based on fast flag
+        if args.fast:
+            print("\n⚡ Using FAST/OPTIMIZED testing mode")
+            single_test_fn = test_single_sample_processing_fast
+            full_test_fn = test_full_dataset_processing_fast
+        else:
+            print("\n📋 Using STANDARD testing mode")
+            single_test_fn = test_single_sample_processing
+            full_test_fn = test_full_dataset_processing
+        
         # Test single sample processing
-        single_success = test_single_sample_processing(
+        single_success = single_test_fn(
             dataset, args.whisper_processor, args.llm_tokenizer, args.sample_idx
         )
         
         # Test full dataset processing
-        full_success = test_full_dataset_processing(
+        full_success = full_test_fn(
             args.arrow_path, args.whisper_processor, args.llm_tokenizer, args.max_samples
         )
         
