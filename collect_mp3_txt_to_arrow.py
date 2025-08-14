@@ -249,9 +249,19 @@ def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] 
     
     logging.info("Scanning directory structure...")
     total_files = 0
+    processed_dirs = 0
+    
+    # First pass - count directories for progress estimation
+    total_dirs = sum(1 for _, dirs, _ in os.walk(input_dir))
     
     for root, dirs, files in os.walk(input_dir):
+        processed_dirs += 1
         total_files += len(files)
+        
+        # Simple progress indicator every 1000 directories
+        if processed_dirs % 1000 == 0:
+            progress = (processed_dirs / total_dirs) * 100
+            print(f"\r📁 Scanning: {processed_dirs:,}/{total_dirs:,} dirs ({progress:.1f}%) - {total_files:,} files found", end='', flush=True)
         
         # Process files in batches to avoid memory issues
         for filename in files:
@@ -263,6 +273,8 @@ def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] 
             elif ext.lower() in text_extensions:
                 text_files[name] = filepath
     
+    print()  # New line after progress
+    
     logging.info(f"Scanned {total_files} total files in {time.time() - start_time:.2f}s")
     logging.info(f"Found {len(audio_files)} audio files and {len(text_files)} text files")
     
@@ -271,14 +283,21 @@ def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] 
     matched_count = 0
     
     logging.info("Matching audio-text pairs...")
-    for name in audio_files:
+    total_audio = len(audio_files)
+    
+    for i, name in enumerate(audio_files):
         if name in text_files:
             pairs.append((audio_files[name], text_files[name]))
             matched_count += 1
-            
-            # Log progress for large datasets
-            if matched_count % 100000 == 0:
-                logging.info(f"Matched {matched_count} pairs...")
+        
+        # Simple progress indicator for large datasets
+        if (i + 1) % 50000 == 0:
+            progress = ((i + 1) / total_audio) * 100
+            match_rate = (matched_count / (i + 1)) * 100
+            print(f"\r🔗 Matching: {i+1:,}/{total_audio:,} ({progress:.1f}%) - {matched_count:,} pairs ({match_rate:.1f}% match rate)", end='', flush=True)
+    
+    if total_audio >= 50000:  # Only print newline if we showed progress
+        print()
     
     unmatched_audio = len(audio_files) - matched_count
     unmatched_text = len(text_files) - matched_count
@@ -485,7 +504,9 @@ def process_sample_batch(batch_data: Tuple[List[Tuple[str, str]], int, int, int,
             print(f"Batch {batch_id}: Skipping corrupted file {Path(audio_path).stem}: {e}")
             continue
     
-    print(f"Batch {batch_id}/{total_batches} completed: {len(samples)} successful, {failed_count} failed")
+    # Simple progress indicator with emoji
+    success_rate = len(samples) / len(pairs) * 100 if pairs else 0
+    print(f"✅ Batch {batch_id}/{total_batches}: {len(samples)}/{len(pairs)} samples ({success_rate:.1f}%)")
     return samples
 
 
@@ -541,13 +562,16 @@ def create_arrow_dataset_batch(pairs: List[Tuple[str, str]], target_sr: int = 16
                     all_samples.extend(batch_samples)
                     pbar.update(1)
                     
-                    # Memory management - force garbage collection
+                    # Memory management - force garbage collection  
                     if batch_id % 10 == 0:
                         gc.collect()
                         
-                        # Log memory usage
+                        # Simple memory usage indicator
                         memory_gb = psutil.Process().memory_info().rss / 1024 / 1024 / 1024
-                        logging.info(f"Memory usage: {memory_gb:.2f} GB")
+                        completed_batches = len([f for f in future_to_batch if f.done()])
+                        total_samples = len(all_samples)
+                        
+                        print(f"💾 Progress: {completed_batches}/{len(batches)} batches, {total_samples:,} samples, {memory_gb:.1f}GB RAM")
                         
                 except Exception as e:
                     logging.error(f"Batch {batch_id} failed: {e}")
