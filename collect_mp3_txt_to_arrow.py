@@ -381,8 +381,23 @@ def validate_output_compatibility(dataset: Dataset) -> bool:
     
     # Validate audio array
     audio_array = sample['mp3']['array']
-    if not isinstance(audio_array, np.ndarray):
-        raise ValueError("Audio array should be numpy array")
+    # HuggingFace Dataset may convert numpy arrays to lists during serialization
+    if not isinstance(audio_array, (np.ndarray, list)):
+        raise ValueError(f"Audio array should be numpy array or list, got {type(audio_array)}")
+    
+    # Convert back to numpy array if it's a list
+    if isinstance(audio_array, list):
+        try:
+            audio_array = np.array(audio_array, dtype=np.float32)
+        except Exception as e:
+            raise ValueError(f"Could not convert audio array to numpy: {e}")
+    
+    # Validate array properties
+    if len(audio_array) == 0:
+        raise ValueError("Audio array is empty")
+    
+    if np.any(np.isnan(audio_array)) or np.any(np.isinf(audio_array)):
+        raise ValueError("Audio array contains NaN or infinite values")
     
     # Validate text
     text = sample['json']['text']
