@@ -144,6 +144,12 @@ class TestTasteTokenize:
         """Create mock model and processor for testing."""
         model = Mock()
         model.device = DEVICE
+        
+        # Mock parameters() method to return an iterator with mock parameter having dtype
+        mock_param = Mock()
+        mock_param.dtype = torch.float32
+        model.parameters = Mock(return_value=iter([mock_param]))
+        
         model.audio_tower = Mock()
         model.audio_tower.return_value = {
             'quantized_indices': torch.randint(0, 1024, (1, 10, 4), device=DEVICE)
