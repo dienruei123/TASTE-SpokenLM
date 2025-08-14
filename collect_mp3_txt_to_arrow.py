@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import torchaudio
 import librosa
-from datasets import Dataset
+from datasets import Dataset, concatenate_datasets
 from tqdm import tqdm
 import json
 import warnings
@@ -212,6 +212,41 @@ def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024
     return corrupted_files
 
 
+def discover_random_string_folders(input_dir: str, min_depth: int = 2) -> List[str]:
+    """
+    Discover all random-string folders for chunked processing.
+    
+    Args:
+        input_dir: Root directory to search in
+        min_depth: Minimum depth to look for random-string folders
+        
+    Returns:
+        List of random-string folder paths
+    """
+    random_folders = []
+    input_path = Path(input_dir)
+    
+    logging.info("Discovering random-string folders for chunked processing...")
+    
+    # Walk through directory structure and identify random-string folders
+    for root, dirs, files in os.walk(input_dir):
+        current_depth = len(Path(root).relative_to(input_path).parts)
+        
+        # Look for folders at appropriate depth that contain audio/text files
+        if current_depth >= min_depth:
+            # Check if this directory contains audio/text files (leaf folder)
+            has_audio = any(f.lower().endswith(('.mp3', '.wav', '.flac')) for f in files)
+            has_text = any(f.lower().endswith('.txt') for f in files)
+            
+            if has_audio and has_text:
+                random_folders.append(root)
+                # Don't traverse deeper into this folder since it's a leaf
+                dirs.clear()
+    
+    logging.info(f"Found {len(random_folders)} random-string folders to process")
+    return sorted(random_folders)
+
+
 def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] = None, 
                                    text_extensions: List[str] = None, 
                                    max_workers: int = None) -> List[Tuple[str, str]]:
@@ -258,10 +293,11 @@ def find_audio_text_pairs_optimized(input_dir: str, audio_extensions: List[str] 
         processed_dirs += 1
         total_files += len(files)
         
-        # Simple progress indicator every 1000 directories
-        if processed_dirs % 1000 == 0:
+        # Progress indicator every directory (for large data per dir)
+        if processed_dirs % 1 == 0:
             progress = (processed_dirs / total_dirs) * 100
-            print(f"\r📁 Scanning: {processed_dirs:,}/{total_dirs:,} dirs ({progress:.1f}%) - {total_files:,} files found", end='', flush=True)
+            current_dir = Path(root).name
+            print(f"\r📁 Scanning: {current_dir}... ({processed_dirs:,}/{total_dirs:,} - {progress:.1f}%) - {total_files:,} files", end='', flush=True)
         
         # Process files in batches to avoid memory issues
         for filename in files:
@@ -419,6 +455,93 @@ def load_text(text_path: str, encoding: str = 'utf-8') -> str:
         raise ValueError(f"Could not decode text file {text_path}")
 
 
+def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: int = 16000,
+                         text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Optional[str]:
+    """
+    Process a single random-string folder and save to intermediate .arrow file.
+    
+    Args:
+        folder_path: Path to the random-string folder
+        intermediate_dir: Directory to save intermediate files
+        target_sr: Target sample rate
+        text_encoding: Text file encoding
+        min_file_size: Minimum file size validation
+        
+    Returns:
+        Path to created intermediate file, or None if no valid samples
+    """
+    folder_name = Path(folder_path).name
+    intermediate_path = Path(intermediate_dir)
+    intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    # Generate intermediate file name
+    intermediate_file = intermediate_path / f"intermediate_{folder_name}.arrow"
+    
+    # Skip if already processed
+    if intermediate_file.exists():
+        logging.debug(f"Skipping already processed folder: {folder_name}")
+        return str(intermediate_file)
+    
+    try:
+        # Find audio-text pairs in this folder only
+        audio_files = {}
+        text_files = {}
+        
+        for file in os.listdir(folder_path):
+            filepath = os.path.join(folder_path, file)
+            if os.path.isfile(filepath):
+                name, ext = os.path.splitext(file)
+                
+                if ext.lower() in ['.mp3', '.wav', '.flac']:
+                    audio_files[name] = filepath
+                elif ext.lower() == '.txt':
+                    text_files[name] = filepath
+        
+        # Create pairs
+        pairs = []
+        for name in audio_files:
+            if name in text_files:
+                pairs.append((audio_files[name], text_files[name]))
+        
+        if not pairs:
+            logging.warning(f"No audio-text pairs found in folder: {folder_name}")
+            return None
+        
+        # Process samples from this folder
+        samples = []
+        for audio_path, text_path in pairs:
+            try:
+                # Use filename prefix as sample_id
+                audio_filename = Path(audio_path).stem
+                sample_id = audio_filename
+                
+                # Create sample with validation
+                sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding, min_file_size)
+                samples.append(sample)
+                
+            except Exception as e:
+                logging.debug(f"Skipping corrupted file {Path(audio_path).stem} in {folder_name}: {e}")
+                continue
+        
+        if not samples:
+            logging.warning(f"No valid samples created from folder: {folder_name}")
+            return None
+        
+        # Create and save intermediate dataset
+        intermediate_dataset = Dataset.from_list(samples)
+        intermediate_dataset.save_to_disk(str(intermediate_file))
+        
+        # Clear memory
+        del samples, intermediate_dataset
+        gc.collect()
+        
+        return str(intermediate_file)
+        
+    except Exception as e:
+        logging.error(f"Failed to process folder {folder_name}: {e}")
+        return None
+
+
 def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: int = 16000, 
                   text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Dict:
     """
@@ -510,6 +633,129 @@ def process_sample_batch(batch_data: Tuple[List[Tuple[str, str]], int, int, int,
     return samples
 
 
+def merge_intermediate_files(intermediate_files: List[str], final_output: str) -> Dataset:
+    """
+    Merge intermediate .arrow files into final dataset using streaming approach.
+    
+    Args:
+        intermediate_files: List of paths to intermediate .arrow files
+        final_output: Path for final output file
+        
+    Returns:
+        Final merged dataset
+    """
+    logging.info(f"Merging {len(intermediate_files)} intermediate files...")
+    
+    if not intermediate_files:
+        raise ValueError("No intermediate files to merge")
+    
+    # Load datasets one by one to avoid memory overflow
+    datasets = []
+    total_samples = 0
+    
+    for i, file_path in enumerate(tqdm(intermediate_files, desc="Loading intermediate files")):
+        try:
+            if Path(file_path).exists():
+                dataset = Dataset.load_from_disk(file_path)
+                datasets.append(dataset)
+                total_samples += len(dataset)
+                
+                # Memory management - merge in batches to avoid overflow
+                if len(datasets) >= 100:  # Merge every 100 datasets
+                    logging.info(f"Merging batch of {len(datasets)} datasets...")
+                    merged_batch = concatenate_datasets(datasets)
+                    datasets = [merged_batch]
+                    gc.collect()
+                    
+            else:
+                logging.warning(f"Intermediate file not found: {file_path}")
+        except Exception as e:
+            logging.error(f"Failed to load intermediate file {file_path}: {e}")
+            continue
+    
+    if not datasets:
+        raise ValueError("No valid intermediate datasets loaded")
+    
+    # Final merge
+    logging.info(f"Performing final merge of {len(datasets)} dataset batches...")
+    final_dataset = concatenate_datasets(datasets) if len(datasets) > 1 else datasets[0]
+    
+    logging.info(f"Successfully merged {total_samples:,} samples into final dataset")
+    
+    # Clear memory
+    del datasets
+    gc.collect()
+    
+    return final_dataset
+
+
+def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_sr: int = 16000,
+                                text_encoding: str = 'utf-8', min_file_size: int = 1024,
+                                folders_per_batch: int = 1000, max_workers: int = None) -> Dataset:
+    """
+    Create dataset using folder-by-folder chunked processing for large datasets.
+    
+    Args:
+        input_dir: Input directory containing random-string folders
+        intermediate_dir: Directory for temporary intermediate files  
+        target_sr: Target sample rate
+        text_encoding: Text encoding
+        min_file_size: Minimum file size validation
+        folders_per_batch: Process this many folders before creating intermediate file
+        max_workers: Number of parallel workers
+        
+    Returns:
+        Final dataset
+    """
+    # Discover all random-string folders
+    random_folders = discover_random_string_folders(input_dir)
+    
+    if not random_folders:
+        raise ValueError(f"No random-string folders found in {input_dir}")
+    
+    logging.info(f"Processing {len(random_folders)} folders with chunked approach")
+    
+    # Create intermediate directory
+    intermediate_path = Path(intermediate_dir)
+    intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    # Process folders and collect intermediate files
+    intermediate_files = []
+    processed_count = 0
+    
+    for i, folder_path in enumerate(random_folders):
+        folder_name = Path(folder_path).name
+        
+        # Progress indicator (every directory)
+        progress = ((i + 1) / len(random_folders)) * 100
+        print(f"\r📁 Processing: {folder_name}... ({i+1:,}/{len(random_folders):,} - {progress:.1f}%)", end='', flush=True)
+        
+        # Process single folder
+        intermediate_file = process_single_folder(
+            folder_path, intermediate_dir, target_sr, text_encoding, min_file_size
+        )
+        
+        if intermediate_file:
+            intermediate_files.append(intermediate_file)
+            processed_count += 1
+        
+        # Memory management
+        if (i + 1) % 100 == 0:
+            gc.collect()
+    
+    print()  # New line after progress
+    
+    logging.info(f"Successfully processed {processed_count}/{len(random_folders)} folders")
+    
+    if not intermediate_files:
+        raise ValueError("No valid intermediate files created")
+    
+    # Merge all intermediate files
+    final_dataset = merge_intermediate_files(intermediate_files, "final_output")
+    
+    return final_dataset
+
+
 def create_arrow_dataset_batch(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
                               text_encoding: str = 'utf-8', min_file_size: int = 1024,
                               batch_size: int = 1000, max_workers: int = None) -> Dataset:
@@ -529,7 +775,7 @@ def create_arrow_dataset_batch(pairs: List[Tuple[str, str]], target_sr: int = 16
         HuggingFace Dataset
     """
     if max_workers is None:
-        max_workers = min(8, (os.cpu_count() or 1))  # Conservative for memory usage
+        max_workers = min(32, (os.cpu_count() or 1))  # More aggressive with 1TB RAM
     
     logging.info(f"Processing {len(pairs)} pairs with batch size {batch_size} and {max_workers} workers")
     
@@ -616,11 +862,12 @@ def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000,
         HuggingFace Dataset
     """
     # Auto-detect whether to use batch processing
+    # With 1TB RAM, we can handle much larger datasets in memory
     if use_batch_processing is None:
-        use_batch_processing = len(pairs) > 10000  # Use batch processing for >10k samples
+        use_batch_processing = len(pairs) > 1000000  # Use batch processing for >1M samples
     
     if use_batch_processing:
-        logging.info(f"Using batch processing for {len(pairs)} samples (threshold: >10k)")
+        logging.info(f"Using batch processing for {len(pairs)} samples (threshold: >1M)")
         return create_arrow_dataset_batch(pairs, target_sr, text_encoding, min_file_size, 
                                         batch_size, max_workers)
     else:
@@ -741,8 +988,8 @@ def main():
                        help='List files that fail validation (for debugging)')
     parser.add_argument('--min_file_size', type=int, default=1024,
                        help='Minimum file size in bytes to consider valid (default: 1024)')
-    parser.add_argument('--batch_size', type=int, default=1000,
-                       help='Batch size for parallel processing (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=5000,
+                       help='Batch size for parallel processing (default: 5000, optimized for 1TB RAM)')
     parser.add_argument('--max_workers', type=int, default=None,
                        help='Maximum number of parallel workers (default: auto)')
     parser.add_argument('--force_batch_processing', action='store_true',
@@ -751,6 +998,14 @@ def main():
                        help='Resume processing from existing partial dataset')
     parser.add_argument('--diagnose_mp3', action='store_true',
                        help='Run detailed diagnostics on MP3 files')
+    parser.add_argument('--chunk_by_folders', action='store_true',
+                       help='Enable folder-by-folder processing for large datasets')
+    parser.add_argument('--intermediate_dir', type=str, default='temp_intermediates',
+                       help='Directory for intermediate .arrow files (default: temp_intermediates)')
+    parser.add_argument('--folders_per_batch', type=int, default=1000,
+                       help='Process N folders before intermediate save (default: 1000)')
+    parser.add_argument('--keep_intermediates', action='store_true',
+                       help='Keep intermediate files after merging (for debugging)')
     
     args = parser.parse_args()
     
@@ -758,7 +1013,38 @@ def main():
     setup_logging(args.log_level)
     
     try:
-        # Find audio-text pairs
+        # Check if using chunked processing
+        if args.chunk_by_folders:
+            logging.info(f"Using chunked folder-by-folder processing for {args.input_dir}")
+            
+            # Create dataset using chunked approach
+            dataset = create_arrow_dataset_chunked(
+                args.input_dir,
+                args.intermediate_dir,
+                args.target_sr,
+                args.text_encoding,
+                args.min_file_size,
+                args.folders_per_batch,
+                args.max_workers
+            )
+            
+            # Save final dataset
+            logging.info(f"Saving final dataset to {args.output_file}")
+            os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
+            dataset.save_to_disk(args.output_file)
+            
+            # Cleanup intermediate files unless requested to keep
+            if not args.keep_intermediates:
+                logging.info("Cleaning up intermediate files...")
+                import shutil
+                if Path(args.intermediate_dir).exists():
+                    shutil.rmtree(args.intermediate_dir)
+            
+            logging.info(f"Successfully created chunked dataset with {len(dataset)} samples")
+            logging.info(f"Final output saved to: {args.output_file}")
+            return
+        
+        # Standard processing approach
         logging.info(f"Searching for audio-text pairs in {args.input_dir}")
         pairs = find_audio_text_pairs(
             args.input_dir, 
