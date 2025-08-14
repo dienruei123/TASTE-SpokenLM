@@ -77,14 +77,118 @@ def validate_audio_file(audio_path: str, min_file_size: int = 1024) -> bool:
                     return False
                     
         except Exception as e:
-            logging.warning(f"Cannot get audio info for {audio_path}: {e}")
-            return False
+            # Try alternative metadata extraction methods
+            logging.debug(f"torchaudio.info failed for {audio_path}: {e}")
+            
+            # Try librosa for metadata (fallback)
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    # Just get duration without loading audio
+                    duration = librosa.get_duration(path=audio_path)
+                    if duration <= 0:
+                        logging.warning(f"Audio file has zero duration: {audio_path}")
+                        return False
+            except Exception as e2:
+                # Final fallback - try to actually load a small portion
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        # Try to load just first 0.1 second to verify file is readable
+                        y, sr = librosa.load(audio_path, duration=0.1, sr=None)
+                        if len(y) == 0 or sr <= 0:
+                            logging.warning(f"Audio file failed verification load: {audio_path}")
+                            return False
+                except Exception as e3:
+                    logging.warning(f"All metadata extraction methods failed for {audio_path}")
+                    logging.debug(f"  torchaudio: {e}")
+                    logging.debug(f"  librosa duration: {e2}")
+                    logging.debug(f"  librosa load: {e3}")
+                    return False
         
         return True
         
     except Exception as e:
         logging.error(f"Error validating audio file {audio_path}: {e}")
         return False
+
+
+def diagnose_mp3_files(pairs: List[Tuple[str, str]], max_samples: int = 10) -> None:
+    """
+    Run detailed diagnostics on MP3 files to understand format issues.
+    
+    Args:
+        pairs: List of (audio_path, text_path) tuples
+        max_samples: Maximum number of files to diagnose in detail
+    """
+    import subprocess
+    
+    logging.info(f"Running detailed MP3 diagnostics on up to {max_samples} files...")
+    
+    for i, (audio_path, text_path) in enumerate(pairs[:max_samples]):
+        print(f"\n{'='*60}")
+        print(f"DIAGNOSING FILE {i+1}/{min(max_samples, len(pairs))}: {Path(audio_path).name}")
+        print(f"{'='*60}")
+        
+        # File info
+        file_path = Path(audio_path)
+        print(f"File size: {file_path.stat().st_size:,} bytes")
+        print(f"File extension: {file_path.suffix}")
+        
+        # Try different methods
+        methods_results = {}
+        
+        # 1. torchaudio.info
+        try:
+            info = torchaudio.info(audio_path)
+            methods_results['torchaudio'] = f"✓ Success: {info.num_frames} frames, {info.sample_rate}Hz"
+        except Exception as e:
+            methods_results['torchaudio'] = f"✗ Failed: {e}"
+        
+        # 2. librosa duration
+        try:
+            duration = librosa.get_duration(path=audio_path)
+            methods_results['librosa_duration'] = f"✓ Success: {duration:.2f}s"
+        except Exception as e:
+            methods_results['librosa_duration'] = f"✗ Failed: {e}"
+        
+        # 3. librosa load (small sample)
+        try:
+            y, sr = librosa.load(audio_path, duration=0.1, sr=None)
+            methods_results['librosa_load'] = f"✓ Success: loaded {len(y)} samples at {sr}Hz"
+        except Exception as e:
+            methods_results['librosa_load'] = f"✗ Failed: {e}"
+        
+        # 4. ffprobe (if available)
+        try:
+            result = subprocess.run(['ffprobe', '-v', 'quiet', '-print_format', 'json', 
+                                   '-show_format', audio_path], 
+                                   capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                import json
+                info = json.loads(result.stdout)
+                duration = float(info['format']['duration'])
+                bit_rate = info['format'].get('bit_rate', 'unknown')
+                methods_results['ffprobe'] = f"✓ Success: {duration:.2f}s, {bit_rate} bit_rate"
+            else:
+                methods_results['ffprobe'] = f"✗ Failed: ffprobe error"
+        except Exception as e:
+            methods_results['ffprobe'] = f"✗ Failed: {e}"
+        
+        # Print results
+        for method, result in methods_results.items():
+            print(f"{method:20}: {result}")
+        
+        # Check if file starts with valid MP3 header
+        try:
+            with open(audio_path, 'rb') as f:
+                header = f.read(10)
+                if header.startswith(b'\xff\xfb') or header.startswith(b'ID3'):
+                    print(f"{'MP3 header':20}: ✓ Valid MP3 header detected")
+                else:
+                    print(f"{'MP3 header':20}: ✗ No valid MP3 header (first 10 bytes: {header.hex()})")
+        except Exception as e:
+            print(f"{'MP3 header':20}: ✗ Cannot read file: {e}")
 
 
 def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024) -> List[str]:
@@ -621,6 +725,8 @@ def main():
                        help='Force batch processing even for small datasets')
     parser.add_argument('--resume_from', type=str, default=None,
                        help='Resume processing from existing partial dataset')
+    parser.add_argument('--diagnose_mp3', action='store_true',
+                       help='Run detailed diagnostics on MP3 files')
     
     args = parser.parse_args()
     
@@ -635,6 +741,11 @@ def main():
             args.audio_extensions, 
             args.text_extensions
         )
+        
+        # Run diagnostics if requested
+        if args.diagnose_mp3:
+            diagnose_mp3_files(pairs, max_samples=10)
+            return
         
         # List corrupted files if requested
         if args.list_corrupted:
