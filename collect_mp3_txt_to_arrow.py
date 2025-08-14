@@ -19,6 +19,7 @@ import librosa
 from datasets import Dataset
 from tqdm import tqdm
 import json
+import warnings
 
 
 def setup_logging(log_level: str = "INFO"):
@@ -27,6 +28,78 @@ def setup_logging(log_level: str = "INFO"):
         level=getattr(logging, log_level.upper()),
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
+
+
+def validate_audio_file(audio_path: str, min_file_size: int = 1024) -> bool:
+    """
+    Validate audio file before processing to detect corruption.
+    
+    Args:
+        audio_path: Path to audio file
+        min_file_size: Minimum file size in bytes to consider valid
+    
+    Returns:
+        True if file appears valid, False otherwise
+    """
+    try:
+        file_path = Path(audio_path)
+        
+        # Check if file exists
+        if not file_path.exists():
+            logging.error(f"Audio file does not exist: {audio_path}")
+            return False
+        
+        # Check file size (skip very small files that are likely corrupted)
+        file_size = file_path.stat().st_size
+        if file_size < min_file_size:
+            logging.warning(f"Audio file too small ({file_size} bytes), likely corrupted: {audio_path}")
+            return False
+        
+        # Try to get basic audio info without loading the full file
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                info = torchaudio.info(audio_path)
+                
+                # Check if audio info is reasonable
+                if info.num_frames == 0:
+                    logging.warning(f"Audio file has zero frames: {audio_path}")
+                    return False
+                
+                if info.sample_rate <= 0:
+                    logging.warning(f"Audio file has invalid sample rate: {audio_path}")
+                    return False
+                    
+        except Exception as e:
+            logging.warning(f"Cannot get audio info for {audio_path}: {e}")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error validating audio file {audio_path}: {e}")
+        return False
+
+
+def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024) -> List[str]:
+    """
+    List files that fail validation for debugging purposes.
+    
+    Args:
+        pairs: List of (audio_path, text_path) tuples
+        min_file_size: Minimum file size in bytes to consider valid
+    
+    Returns:
+        List of corrupted file paths
+    """
+    corrupted_files = []
+    
+    logging.info("Checking for corrupted files...")
+    for audio_path, text_path in tqdm(pairs, desc="Validating files"):
+        if not validate_audio_file(audio_path, min_file_size):
+            corrupted_files.append(audio_path)
+    
+    return corrupted_files
 
 
 def find_audio_text_pairs(input_dir: str, audio_extensions: List[str] = None, 
@@ -89,49 +162,62 @@ def load_audio(audio_path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int
     Returns:
         Tuple of (audio_array, sample_rate)
     """
-    try:
-        # Try torchaudio first
-        waveform, orig_sr = torchaudio.load(audio_path)
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
+    # Suppress warnings for cleaner output
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
         
-        # Resample if needed
-        if orig_sr != target_sr:
-            resampler = torchaudio.transforms.Resample(orig_freq=orig_sr, new_freq=target_sr)
-            waveform = resampler(waveform)
-        
-        # Convert to numpy and squeeze
-        audio_array = waveform.squeeze().numpy().astype(np.float32)
-        
-        # Ensure it's a proper numpy array
-        if not isinstance(audio_array, np.ndarray):
-            raise ValueError(f"Failed to convert to numpy array for {audio_path}")
-        
-        # Check for empty or invalid audio
-        if audio_array.size == 0:
-            raise ValueError(f"Empty audio array for {audio_path}")
-            
-        return audio_array, target_sr
-        
-    except Exception as e:
-        logging.warning(f"Torchaudio failed for {audio_path}, trying librosa: {e}")
         try:
-            # Fallback to librosa with more robust error handling
-            audio_array, loaded_sr = librosa.load(audio_path, sr=target_sr, mono=True)
+            # Try torchaudio first
+            waveform, orig_sr = torchaudio.load(audio_path)
+            
+            # Convert to mono if stereo
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            
+            # Resample if needed
+            if orig_sr != target_sr:
+                resampler = torchaudio.transforms.Resample(orig_freq=orig_sr, new_freq=target_sr)
+                waveform = resampler(waveform)
+            
+            # Convert to numpy and squeeze
+            audio_array = waveform.squeeze().numpy().astype(np.float32)
             
             # Ensure it's a proper numpy array
             if not isinstance(audio_array, np.ndarray):
-                raise ValueError(f"Librosa failed to return numpy array for {audio_path}")
+                raise ValueError(f"Failed to convert to numpy array for {audio_path}")
             
             # Check for empty or invalid audio
             if audio_array.size == 0:
-                raise ValueError(f"Empty audio array from librosa for {audio_path}")
+                raise ValueError(f"Empty audio array for {audio_path}")
+            
+            # Check for NaN or infinite values
+            if np.any(np.isnan(audio_array)) or np.any(np.isinf(audio_array)):
+                raise ValueError(f"Audio contains NaN or infinite values: {audio_path}")
                 
-            return audio_array.astype(np.float32), target_sr
+            return audio_array, target_sr
+            
         except Exception as e:
-            logging.error(f"Both torchaudio and librosa failed for {audio_path}: {e}")
-            raise ValueError(f"Could not load audio file {audio_path}: {e}")
+            logging.debug(f"Torchaudio failed for {audio_path}: {e}")
+            try:
+                # Fallback to librosa with more robust error handling
+                audio_array, loaded_sr = librosa.load(audio_path, sr=target_sr, mono=True)
+                
+                # Ensure it's a proper numpy array
+                if not isinstance(audio_array, np.ndarray):
+                    raise ValueError(f"Librosa failed to return numpy array for {audio_path}")
+                
+                # Check for empty or invalid audio
+                if audio_array.size == 0:
+                    raise ValueError(f"Empty audio array from librosa for {audio_path}")
+                
+                # Check for NaN or infinite values
+                if np.any(np.isnan(audio_array)) or np.any(np.isinf(audio_array)):
+                    raise ValueError(f"Audio contains NaN or infinite values: {audio_path}")
+                    
+                return audio_array.astype(np.float32), target_sr
+            except Exception as e2:
+                logging.error(f"Both torchaudio and librosa failed for {audio_path}. Torchaudio: {e}, Librosa: {e2}")
+                raise ValueError(f"Could not load audio file {audio_path}: {e2}")
 
 
 def load_text(text_path: str, encoding: str = 'utf-8') -> str:
@@ -163,7 +249,7 @@ def load_text(text_path: str, encoding: str = 'utf-8') -> str:
 
 
 def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: int = 16000, 
-                  text_encoding: str = 'utf-8') -> Dict:
+                  text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Dict:
     """
     Create a single sample for the dataset.
     
@@ -173,10 +259,15 @@ def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: in
         sample_id: Unique identifier for the sample
         target_sr: Target sample rate
         text_encoding: Text file encoding
+        min_file_size: Minimum file size in bytes to consider valid
     
     Returns:
         Dictionary representing a single sample
     """
+    # Validate audio file first
+    if not validate_audio_file(audio_path, min_file_size):
+        raise ValueError(f"Audio file validation failed: {audio_path}")
+    
     # Load audio
     audio_array, sample_rate = load_audio(audio_path, target_sr)
     
@@ -185,6 +276,13 @@ def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: in
     
     if not text:
         raise ValueError(f"Empty text file: {text_path}")
+    
+    # Additional validation
+    if not isinstance(audio_array, np.ndarray):
+        raise ValueError(f"Audio array is not numpy array: {audio_path}")
+    
+    if audio_array.size == 0:
+        raise ValueError(f"Audio array is empty: {audio_path}")
     
     # Create sample in the expected format
     sample = {
@@ -205,7 +303,7 @@ def create_sample(audio_path: str, text_path: str, sample_id: str, target_sr: in
 
 
 def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
-                        text_encoding: str = 'utf-8') -> Dataset:
+                        text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Dataset:
     """
     Create HuggingFace Dataset from audio-text pairs.
     
@@ -213,28 +311,37 @@ def create_arrow_dataset(pairs: List[Tuple[str, str]], target_sr: int = 16000,
         pairs: List of (audio_path, text_path) tuples
         target_sr: Target sample rate for audio
         text_encoding: Text file encoding
+        min_file_size: Minimum file size in bytes to consider valid
     
     Returns:
         HuggingFace Dataset
     """
     samples = []
+    failed_count = 0
+    
+    logging.info(f"Processing {len(pairs)} audio-text pairs...")
     
     for audio_path, text_path in tqdm(pairs, desc="Processing samples"):
         try:
             # Use filename prefix as sample_id
             audio_filename = Path(audio_path).stem
             sample_id = audio_filename
-            sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding)
+            
+            # Create sample with validation
+            sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding, min_file_size)
             samples.append(sample)
             
         except Exception as e:
-            logging.error(f"Failed to process {audio_path}, {text_path}: {e}")
+            failed_count += 1
+            logging.warning(f"Skipping corrupted file {audio_filename}: {e}")
             continue
     
     if not samples:
-        raise ValueError("No samples were successfully created")
+        raise ValueError("No samples were successfully created - all files may be corrupted")
     
-    logging.info(f"Successfully created {len(samples)} samples")
+    success_rate = len(samples) / len(pairs) * 100
+    logging.info(f"Successfully created {len(samples)} samples out of {len(pairs)} pairs")
+    logging.info(f"Success rate: {success_rate:.1f}% ({failed_count} files skipped due to corruption)")
     
     # Create HuggingFace Dataset
     dataset = Dataset.from_list(samples)
@@ -307,6 +414,10 @@ def main():
                        help='Logging level (default: INFO)')
     parser.add_argument('--validate', action='store_true',
                        help='Validate output compatibility with TASTE pipeline')
+    parser.add_argument('--list_corrupted', action='store_true',
+                       help='List files that fail validation (for debugging)')
+    parser.add_argument('--min_file_size', type=int, default=1024,
+                       help='Minimum file size in bytes to consider valid (default: 1024)')
     
     args = parser.parse_args()
     
@@ -322,12 +433,24 @@ def main():
             args.text_extensions
         )
         
+        # List corrupted files if requested
+        if args.list_corrupted:
+            corrupted_files = list_corrupted_files(pairs, args.min_file_size)
+            if corrupted_files:
+                logging.warning(f"Found {len(corrupted_files)} corrupted files:")
+                for corrupted_file in corrupted_files:
+                    logging.warning(f"  - {corrupted_file}")
+            else:
+                logging.info("No corrupted files found!")
+            return
+        
         # Create Arrow dataset
         logging.info("Creating Arrow dataset...")
         dataset = create_arrow_dataset(
             pairs, 
             args.target_sr, 
-            args.text_encoding
+            args.text_encoding,
+            args.min_file_size
         )
         
         # Validate if requested
