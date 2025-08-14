@@ -9,7 +9,16 @@ with the TASTE speech processing pipeline.
 import argparse
 import logging
 import sys
+import importlib
 from pathlib import Path
+
+# Fix for MetadataPathFinder.invalidate_caches() error
+try:
+    import importlib.util
+    if hasattr(importlib.util, 'invalidate_caches'):
+        importlib.util.invalidate_caches = lambda: None
+except:
+    pass
 
 import torch
 from datasets import Dataset
