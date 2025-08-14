@@ -18,9 +18,36 @@ def test_arrow_basic(arrow_path):
     try:
         # Try to import datasets with error handling
         from datasets import Dataset
+        from pathlib import Path
+        import os
+        
+        # Determine if input is a directory or a single .arrow file
+        arrow_path_obj = Path(arrow_path)
+        
+        if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
+            # Single .arrow file - use Dataset.from_file()
+            print(f"✓ Loading single .arrow file: {arrow_path}")
+            dataset = Dataset.from_file(arrow_path)
+        elif arrow_path_obj.is_dir():
+            # Directory - check if it's a dataset directory or contains .arrow files
+            try:
+                # Try loading as dataset directory first
+                dataset = Dataset.load_from_disk(arrow_path)
+                print(f"✓ Loaded as dataset directory: {arrow_path}")
+            except:
+                # Try finding .arrow files in directory
+                arrow_files = list(arrow_path_obj.glob("*.arrow"))
+                if arrow_files:
+                    print(f"✓ Found {len(arrow_files)} .arrow files in directory")
+                    # Load first .arrow file for testing
+                    dataset = Dataset.from_file(str(arrow_files[0]))
+                    print(f"✓ Testing with first file: {arrow_files[0].name}")
+                else:
+                    raise ValueError(f"No .arrow files found in directory: {arrow_path}")
+        else:
+            raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
         
         # Load the dataset
-        dataset = Dataset.load_from_disk(arrow_path)
         
         print(f"✓ Dataset loaded successfully")
         print(f"✓ Dataset length: {len(dataset)}")
@@ -81,12 +108,21 @@ def test_taste_imports():
         print(f"✗ torch import failed: {e}")
     
     try:
-        from transformers import AutoTokenizer, WhisperProcessor
-        modules_status['transformers'] = True
-        print("✓ transformers imported successfully")
+        from transformers import AutoTokenizer
+        modules_status['transformers_basic'] = True
+        print("✓ transformers (AutoTokenizer) imported successfully")
     except ImportError as e:
-        modules_status['transformers'] = False
-        print(f"✗ transformers import failed: {e}")
+        modules_status['transformers_basic'] = False
+        print(f"✗ transformers (AutoTokenizer) import failed: {e}")
+    
+    try:
+        from transformers import WhisperProcessor
+        modules_status['whisper_processor'] = True
+        print("✓ WhisperProcessor imported successfully")
+    except ImportError as e:
+        modules_status['whisper_processor'] = False
+        print(f"✗ WhisperProcessor import failed: {e}")
+        print("  Try: pip install transformers[torch] or upgrade transformers")
     
     # Test TASTE specific imports
     try:
@@ -121,7 +157,27 @@ def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer
     try:
         # Import required modules
         import torch
-        from transformers import AutoTokenizer, WhisperProcessor
+        from transformers import AutoTokenizer
+        
+        # Try to import WhisperProcessor with fallback
+        try:
+            from transformers import WhisperProcessor
+        except ImportError:
+            print("✗ WhisperProcessor not available. Trying alternative import...")
+            try:
+                from transformers import WhisperFeatureExtractor, WhisperTokenizer
+                # Create a simple processor-like object
+                class SimpleWhisperProcessor:
+                    def __init__(self, model_name):
+                        self.feature_extractor = WhisperFeatureExtractor.from_pretrained(model_name)
+                        self.tokenizer = WhisperTokenizer.from_pretrained(model_name)
+                
+                def WhisperProcessor_from_pretrained(model_name):
+                    return SimpleWhisperProcessor(model_name)
+                WhisperProcessor = type('WhisperProcessor', (), {'from_pretrained': staticmethod(WhisperProcessor_from_pretrained)})
+            except ImportError as e:
+                print(f"✗ Cannot create WhisperProcessor alternative: {e}")
+                return False
         from taste_speech.data.dataset import process_one_sample
         from taste_speech.modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
         
@@ -191,10 +247,44 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
     try:
         # Import required modules
         from taste_speech.data.dataset import load_from_arrows, REQUIRED_COLUMNS
+        from pathlib import Path
+        
+        # Check if WhisperProcessor is available
+        try:
+            from transformers import WhisperProcessor
+        except ImportError:
+            print("⚠ WARNING: WhisperProcessor not available, using fallback approach")
+            # This will be handled by the load_from_arrows function
+        
+        # Determine arrow files to process
+        arrow_path_obj = Path(arrow_path)
+        
+        if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
+            # Single .arrow file
+            arrow_files = [arrow_path]
+            print(f"✓ Processing single .arrow file: {arrow_path}")
+        elif arrow_path_obj.is_dir():
+            # Directory - find all .arrow files
+            arrow_files = [str(f) for f in arrow_path_obj.glob("*.arrow")]
+            if not arrow_files:
+                # Check if it's a dataset directory - convert it to arrow file list
+                try:
+                    from datasets import Dataset
+                    dataset = Dataset.load_from_disk(arrow_path)
+                    # Create a temporary arrow file for testing
+                    temp_arrow = arrow_path_obj / "temp_test.arrow" 
+                    dataset.save_to_disk(str(temp_arrow))
+                    arrow_files = [str(temp_arrow)]
+                    print(f"✓ Converted dataset directory to temporary .arrow file")
+                except:
+                    raise ValueError(f"No .arrow files found in directory: {arrow_path}")
+            else:
+                print(f"✓ Found {len(arrow_files)} .arrow files in directory")
+        else:
+            raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
         
         # Process dataset
         print("✓ Loading dataset with TASTE processing...")
-        arrow_files = [arrow_path]
         
         processed_dataset = load_from_arrows(
             arrow_fpath_list=arrow_files,
@@ -243,7 +333,7 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
 
 def main():
     parser = argparse.ArgumentParser(description="Test Arrow dataset with optional TASTE processing")
-    parser.add_argument('arrow_path', type=str, help='Path to the Arrow dataset directory')
+    parser.add_argument('arrow_path', type=str, help='Path to Arrow dataset (.arrow file or directory containing .arrow files)')
     parser.add_argument('--whisper_processor', type=str, default='openai/whisper-large-v3',
                        help='Whisper processor model path (default: openai/whisper-large-v3)')
     parser.add_argument('--llm_tokenizer', type=str, 
