@@ -106,7 +106,7 @@ generate_outputs: iter[dict] = streaming_generate(
     repetition_penalty: float = 1.1,
     max_length: int = 512,
     eos_id: int = eos_id,
-    emit_timing_func,
+    should_emit_segment,
 )
 
 ### TASTESegment definition:
@@ -134,7 +134,7 @@ class TASTESegment:
 #   - repetition_penalty: float - 重複懲罰係數
 #   - max_length: int - 最大生成長度
 #   - eos_id: int - 結束 token 的 ID
-#   - emit_timing_func: Callable - 控制輸出時機的回調函數
+#   - should_emit_segment: Callable - 判斷是否要產生一個 segment 的回調函數
 
 # Output (Iterator):
 # 每次迭代產出：
@@ -176,6 +176,7 @@ detokenize_output: dict = taste_detokenize(
 #     'audio_waveform': torch.Tensor,          # Generated audio waveform (1, T)
 #     'sampling_rate': int,                    # Audio sampling rate (16000)
 #     'chunk_duration_ms': int,                # Audio chunk duration in milliseconds
+#     'speech_ids': torch.Tensor,              # Generated speech ids
 # }
 
 ```
@@ -295,8 +296,6 @@ def build_conditional_prompt(input_segments, special_token_ids):
     
     return prompt_text_ids, prompt_taste_ids
 ```
-
-**特別注意**：以上這些步驟應該要整合進去 `TasteProcessor` 中，開放函數為 `TasteProcessor().build_conditional_prompt`。
 
 step 3: 對話狀態判斷與生成 (基於現有程式碼)
 
@@ -432,4 +431,10 @@ def _build_inputs_embeds_from_prompt(self, prompt_text_ids, prompt_taste_ids, ll
     return torch.concat(inputs_embeds_list, dim=1)
 ```
 
-**特別注意**：以上這些步驟應該要整合進去 `TasteSpokenLM` 中，開放函數為 `TasteSpokenLM().streaming_generate`。
+### Q2: 
+
+實踐的過程可以去更改原有的程式碼嗎？
+
+### A2:
+
+除非真得非常非常需要，否則在 `taste_speech` 增加的程式碼盡量落在 `taste_speech.streaming` 這個資料夾下
