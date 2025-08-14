@@ -144,6 +144,7 @@ def check_completion_status(text_id: int, action: str) -> 'CompletionStatus':
         'eos': 'finished',
         'stop': 'finished', 
         'no_speech': 'no_speech',
+        'terminate': 'finished',
     }
     
     # segment_end should NOT complete the generation - it just ends a segment

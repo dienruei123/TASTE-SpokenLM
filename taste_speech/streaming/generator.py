@@ -130,7 +130,7 @@ def streaming_generate(
                     
                     # Update current sequences
                     current_text_ids = torch.cat([current_text_ids, next_text_id], dim=1)
-                    current_taste_ids = torch.cat([current_taste_ids, taste_ids.unsqueeze(1)], dim=1)
+                    current_taste_ids = torch.cat([current_taste_ids, taste_ids], dim=1)
                     
                     # Track generated tokens (excluding prompt)
                     generated_text_tokens.append(text_id)
