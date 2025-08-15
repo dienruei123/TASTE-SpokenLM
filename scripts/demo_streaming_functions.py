@@ -9,6 +9,7 @@ detokenization functions using an example audio file.
 import os
 import torch
 import torchaudio
+import argparse
 from pathlib import Path
 
 # Import the streaming functions and models
@@ -17,7 +18,14 @@ from taste_speech.streaming import taste_tokenize, taste_detokenize
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
+    parser.add_argument('--no-chunk', action='store_true', 
+                        help='Disable chunking in step 4 (process all tokens at once)')
+    args = parser.parse_args()
+    
     print("=== TASTE Streaming Functions Demo ===")
+    print(f"Chunking mode: {'DISABLED' if args.no_chunk else 'ENABLED'}")
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
@@ -114,105 +122,143 @@ def main():
         print(f"Error during tokenization: {e}")
         return
     
-    # Step 4: Split tokens into chunks and progressively detokenize
-    print("\n4. Converting TASTE tokens back to audio with chunking...")
-    try:
-        # Configuration for chunking
-        chunk_size = max(1, asr_token_ids.shape[1] // 1)  # Split into ~1 chunks
-        print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
-        print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
-        print(f"  - Chunk size: {chunk_size}")
-        
-        # Initialize previous context (empty at start)
-        prev_text_ids = torch.empty(1, 0, dtype=torch.long, device=device)
-        prev_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)  
-        prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
-        prev_text_word_ids = None
-        prev_audio_ms = 0
-        
-        # Storage for merged outputs
-        all_audio_chunks = []
-        total_duration_ms = 0
-        
-        # Process in chunks
-        for i in range(0, asr_token_ids.shape[1], chunk_size):
-            chunk_start = i
-            chunk_end = min(i + chunk_size, asr_token_ids.shape[1])
-            chunk_num = i // chunk_size + 1
-            total_chunks = (asr_token_ids.shape[1] + chunk_size - 1) // chunk_size
+    # Step 4: Convert TASTE tokens back to audio (with or without chunking)
+    if args.no_chunk:
+        print("\n4. Converting TASTE tokens back to audio (NO CHUNKING)...")
+        try:
+            print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
+            print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
+            print("  - Processing all tokens at once...")
             
-            print(f"  Processing chunk {chunk_num}/{total_chunks} (tokens {chunk_start}:{chunk_end})")
-            
-            # Extract current chunk
-            current_text_ids = asr_token_ids[:, chunk_start:chunk_end]
-            current_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
-            current_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
-            
-            # Call taste_detokenize with previous context
+            # Process all tokens at once without chunking
             result = taste_detokenize(
                 model=model,
                 processor=processor,
                 speaker_embeds=speaker_embeds,
-                prev_text_ids=prev_text_ids,
-                prev_taste_ids=prev_taste_ids,
-                prev_speech_ids=prev_speech_ids,
-                prev_audio_ms=prev_audio_ms,
-                text_ids=current_text_ids,
-                taste_ids=current_taste_ids,
-                text_word_ids=current_word_ids,
-                prev_text_word_ids=prev_text_word_ids,
+                prev_text_ids=torch.empty(1, 0, dtype=torch.long, device=device),
+                prev_taste_ids=torch.empty(1, 0, 4, dtype=torch.long, device=device),
+                prev_speech_ids=torch.empty(1, 0, dtype=torch.long, device=device),
+                prev_audio_ms=0,
+                text_ids=asr_token_ids,
+                taste_ids=taste_tokens,
+                text_word_ids=asr_word_ids,
+                prev_text_word_ids=None,
                 out_sampling_rate=sampling_rate
             )
             
-            # Store this chunk's audio
-            chunk_audio = result['audio_waveform']
-            chunk_duration_ms = result['chunk_duration_ms']
-            all_audio_chunks.append(chunk_audio)
-            total_duration_ms += chunk_duration_ms
+            output_audio = result['audio_waveform']
+            output_sr = result['sampling_rate']
+            total_duration_ms = result['chunk_duration_ms']
             
-            print(f"    - Chunk {chunk_num} audio shape: {chunk_audio.shape}")
-            print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
+            print(f"✓ Audio detokenized successfully (no chunking)")
+            print(f"  - Output audio shape: {output_audio.shape}")
+            print(f"  - Output sampling rate: {output_sr}")
+            print(f"  - Total duration: {total_duration_ms} ms")
             
-            # Update previous context for next iteration
-            prev_text_ids = torch.cat([prev_text_ids, current_text_ids], dim=1)
-            prev_taste_ids = torch.cat([prev_taste_ids, current_taste_ids], dim=1)
-            if prev_text_word_ids is None:
-                prev_text_word_ids = current_word_ids
-            else:
-                prev_text_word_ids = torch.cat([prev_text_word_ids, current_word_ids], dim=1)
-            if 'speech_ids' in result:
-                if prev_speech_ids.shape[1] == 0:
-                    prev_speech_ids = result['speech_ids']
+        except Exception as e:
+            print(f"Error during non-chunked detokenization: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+    else:
+        print("\n4. Converting TASTE tokens back to audio with chunking...")
+        try:
+            # Configuration for chunking
+            chunk_size = max(1, asr_token_ids.shape[1] // 1)  # Split into ~1 chunks
+            print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
+            print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
+            print(f"  - Chunk size: {chunk_size}")
+            
+            # Initialize previous context (empty at start)
+            prev_text_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+            prev_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)  
+            prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+            prev_text_word_ids = None
+            prev_audio_ms = 0
+            
+            # Storage for merged outputs
+            all_audio_chunks = []
+            total_duration_ms = 0
+            
+            # Process in chunks
+            for i in range(0, asr_token_ids.shape[1], chunk_size):
+                chunk_start = i
+                chunk_end = min(i + chunk_size, asr_token_ids.shape[1])
+                chunk_num = i // chunk_size + 1
+                total_chunks = (asr_token_ids.shape[1] + chunk_size - 1) // chunk_size
+                
+                print(f"  Processing chunk {chunk_num}/{total_chunks} (tokens {chunk_start}:{chunk_end})")
+                
+                # Extract current chunk
+                current_text_ids = asr_token_ids[:, chunk_start:chunk_end]
+                current_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
+                current_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
+                
+                # Call taste_detokenize with previous context
+                result = taste_detokenize(
+                    model=model,
+                    processor=processor,
+                    speaker_embeds=speaker_embeds,
+                    prev_text_ids=prev_text_ids,
+                    prev_taste_ids=prev_taste_ids,
+                    prev_speech_ids=prev_speech_ids,
+                    prev_audio_ms=prev_audio_ms,
+                    text_ids=current_text_ids,
+                    taste_ids=current_taste_ids,
+                    text_word_ids=current_word_ids,
+                    prev_text_word_ids=prev_text_word_ids,
+                    out_sampling_rate=sampling_rate
+                )
+                
+                # Store this chunk's audio
+                chunk_audio = result['audio_waveform']
+                chunk_duration_ms = result['chunk_duration_ms']
+                all_audio_chunks.append(chunk_audio)
+                total_duration_ms += chunk_duration_ms
+                
+                print(f"    - Chunk {chunk_num} audio shape: {chunk_audio.shape}")
+                print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
+                
+                # Update previous context for next iteration
+                prev_text_ids = torch.cat([prev_text_ids, current_text_ids], dim=1)
+                prev_taste_ids = torch.cat([prev_taste_ids, current_taste_ids], dim=1)
+                if prev_text_word_ids is None:
+                    prev_text_word_ids = current_word_ids
                 else:
-                    prev_speech_ids = torch.cat([prev_speech_ids, result['speech_ids']], dim=1)
-            prev_audio_ms += chunk_duration_ms
-            
-            print(f"    - Updated prev_text_ids shape: {prev_text_ids.shape}")
-            print(f"    - Updated prev_taste_ids shape: {prev_taste_ids.shape}")
-            print(f"    - Cumulative audio_ms: {prev_audio_ms}")
+                    prev_text_word_ids = torch.cat([prev_text_word_ids, current_word_ids], dim=1)
+                if 'speech_ids' in result:
+                    if prev_speech_ids.shape[1] == 0:
+                        prev_speech_ids = result['speech_ids']
+                    else:
+                        prev_speech_ids = torch.cat([prev_speech_ids, result['speech_ids']], dim=1)
+                prev_audio_ms += chunk_duration_ms
+                
+                print(f"    - Updated prev_text_ids shape: {prev_text_ids.shape}")
+                print(f"    - Updated prev_taste_ids shape: {prev_taste_ids.shape}")
+                print(f"    - Cumulative audio_ms: {prev_audio_ms}")
 
-            print(f"  Save...")
+                print(f"  Save...")
+                output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
+                output_sr = result['sampling_rate']  # Use the last result's sampling rate
+                output_audio_cpu = output_audio.cpu()
+                torchaudio.save(f'tmp_{i}.wav', output_audio_cpu, output_sr)
+                print(f"✓ Output audio saved to tmp_{i}.wav")
+            
+            # Merge all audio chunks
+            print(f"  Merging {len(all_audio_chunks)} audio chunks...")
             output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
             output_sr = result['sampling_rate']  # Use the last result's sampling rate
-            output_audio_cpu = output_audio.cpu()
-            torchaudio.save(f'tmp_{i}.wav', output_audio_cpu, output_sr)
-            print(f"✓ Output audio saved to tmp_{i}.wav")
-        
-        # Merge all audio chunks
-        print(f"  Merging {len(all_audio_chunks)} audio chunks...")
-        output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
-        output_sr = result['sampling_rate']  # Use the last result's sampling rate
-        
-        print(f"✓ Chunked audio detokenized successfully")
-        print(f"  - Final output audio shape: {output_audio.shape}")
-        print(f"  - Output sampling rate: {output_sr}")
-        print(f"  - Total duration: {total_duration_ms} ms")
-        
-    except Exception as e:
-        print(f"Error during chunked detokenization: {e}")
-        import traceback
-        traceback.print_exc()
-        return
+            
+            print(f"✓ Chunked audio detokenized successfully")
+            print(f"  - Final output audio shape: {output_audio.shape}")
+            print(f"  - Output sampling rate: {output_sr}")
+            print(f"  - Total duration: {total_duration_ms} ms")
+            
+        except Exception as e:
+            print(f"Error during chunked detokenization: {e}")
+            import traceback
+            traceback.print_exc()
+            return
     
     # Step 5: Save the output audio
     print("\n5. Saving output audio...")
@@ -234,11 +280,15 @@ def main():
         return
     
     print("\n=== Demo completed successfully! ===")
-    print(f"Successfully tested chunked streaming with prev_text_ids and prev_taste_ids!")
+    if args.no_chunk:
+        print(f"Successfully tested non-chunked processing!")
+        print(f"All tokens were processed at once without chunking.")
+    else:
+        print(f"Successfully tested chunked streaming with prev_text_ids and prev_taste_ids!")
+        print(f"The chunked approach simulates real streaming conditions where")
+        print(f"previous context is maintained across multiple detokenization calls.")
     print(f"You can now listen to the original audio ({audio_path}) and")
     print(f"the reconstructed audio ({output_path}) to compare the quality.")
-    print(f"The chunked approach simulates real streaming conditions where")
-    print(f"previous context is maintained across multiple detokenization calls.")
 
 
 if __name__ == "__main__":
