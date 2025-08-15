@@ -212,38 +212,46 @@ def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024
     return corrupted_files
 
 
-def discover_random_string_folders(input_dir: str, min_depth: int = 2) -> List[str]:
+def discover_random_string_folders(input_dir: str, min_depth: int = 1) -> List[str]:
     """
-    Discover all random-string folders for chunked processing.
+    Discover all folders containing audio/text pairs for chunked processing.
     
     Args:
         input_dir: Root directory to search in
-        min_depth: Minimum depth to look for random-string folders
+        min_depth: Minimum depth to look for folders (default: 1 to handle depth-1 folders)
         
     Returns:
-        List of random-string folder paths
+        List of folder paths containing audio/text pairs
     """
     random_folders = []
     input_path = Path(input_dir)
     
-    logging.info("Discovering random-string folders for chunked processing...")
+    logging.info("Discovering folders with audio/text pairs for chunked processing...")
     
-    # Walk through directory structure and identify random-string folders
+    # Walk through directory structure and identify folders with audio/text files
+    total_dirs_scanned = 0
+    total_files_found = 0
     for root, dirs, files in os.walk(input_dir):
+        total_dirs_scanned += 1
         current_depth = len(Path(root).relative_to(input_path).parts)
         
         # Look for folders at appropriate depth that contain audio/text files
         if current_depth >= min_depth:
             # Check if this directory contains audio/text files (leaf folder)
-            has_audio = any(f.lower().endswith(('.mp3', '.wav', '.flac')) for f in files)
-            has_text = any(f.lower().endswith('.txt') for f in files)
+            audio_files = [f for f in files if f.lower().endswith(('.mp3', '.wav', '.flac'))]
+            text_files = [f for f in files if f.lower().endswith('.txt')]
             
-            if has_audio and has_text:
+            if audio_files and text_files:
+                folder_name = Path(root).name
                 random_folders.append(root)
+                total_files_found += len(files)
+                print(f"📂 Found folder #{len(random_folders)}: {folder_name} (depth {current_depth}) - {len(audio_files)} audio, {len(text_files)} text, {len(files)} total files")
                 # Don't traverse deeper into this folder since it's a leaf
                 dirs.clear()
     
-    logging.info(f"Found {len(random_folders)} random-string folders to process")
+    logging.info(f"Scanned {total_dirs_scanned} directories total")
+    logging.info(f"Found {len(random_folders)} folders with audio/text pairs to process")
+    logging.info(f"Total files discovered: {total_files_found:,}")
     return sorted(random_folders)
 
 
@@ -458,10 +466,10 @@ def load_text(text_path: str, encoding: str = 'utf-8') -> str:
 def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: int = 16000,
                          text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Optional[str]:
     """
-    Process a single random-string folder and save to intermediate .arrow file.
+    Process a single folder and save to intermediate .arrow file.
     
     Args:
-        folder_path: Path to the random-string folder
+        folder_path: Path to the folder
         intermediate_dir: Directory to save intermediate files
         target_sr: Target sample rate
         text_encoding: Text file encoding
@@ -479,8 +487,10 @@ def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: in
     
     # Skip if already processed
     if intermediate_file.exists():
-        logging.debug(f"Skipping already processed folder: {folder_name}")
+        print(f"⚡ Skipping already processed folder: {folder_name}")
         return str(intermediate_file)
+    
+    print(f"🔍 Reading folder: {folder_name}...")
     
     try:
         # Find audio-text pairs in this folder only
@@ -503,12 +513,15 @@ def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: in
             if name in text_files:
                 pairs.append((audio_files[name], text_files[name]))
         
+        print(f"📊 Found in {folder_name}: {len(audio_files)} audio, {len(text_files)} text → {len(pairs)} pairs")
+        
         if not pairs:
-            logging.warning(f"No audio-text pairs found in folder: {folder_name}")
+            print(f"⚠️  No audio-text pairs found in folder: {folder_name}")
             return None
         
         # Process samples from this folder
         samples = []
+        failed_count = 0
         for audio_path, text_path in pairs:
             try:
                 # Use filename prefix as sample_id
@@ -520,16 +533,20 @@ def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: in
                 samples.append(sample)
                 
             except Exception as e:
+                failed_count += 1
                 logging.debug(f"Skipping corrupted file {Path(audio_path).stem} in {folder_name}: {e}")
                 continue
         
         if not samples:
-            logging.warning(f"No valid samples created from folder: {folder_name}")
+            print(f"❌ No valid samples created from folder: {folder_name} ({failed_count} failed)")
             return None
         
         # Create and save intermediate dataset
         intermediate_dataset = Dataset.from_list(samples)
         intermediate_dataset.save_to_disk(str(intermediate_file))
+        
+        success_rate = len(samples) / len(pairs) * 100
+        print(f"✅ Completed folder: {folder_name} - {len(samples)}/{len(pairs)} samples processed ({success_rate:.1f}% success, {failed_count} failed)")
         
         # Clear memory
         del samples, intermediate_dataset
