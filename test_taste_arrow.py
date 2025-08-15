@@ -147,26 +147,34 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
         if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
             arrow_files = [arrow_path]
         elif arrow_path_obj.is_dir():
-            # For dataset directory, create temporary arrow file
-            from datasets import Dataset
-            dataset = Dataset.load_from_disk(arrow_path)
+            # For dataset directory, either find existing .arrow files or create temp file
+            existing_arrow_files = list(arrow_path_obj.glob("*.arrow"))
             
-            if test_samples and len(dataset) > test_samples:
-                import random
-                random.seed(42)
-                indices = random.sample(range(len(dataset)), test_samples)
-                dataset = dataset.select(indices)
-            
-            temp_arrow = arrow_path_obj / "temp_test.arrow"
-            # Use to_arrow() to create a single .arrow file, not save_to_disk() which creates a directory
-            import pyarrow as pa
-            table = dataset.data.table
-            with pa.OSFile(str(temp_arrow), 'wb') as sink:
-                with pa.RecordBatchFileWriter(sink, table.schema) as writer:
-                    writer.write_table(table)
-            
-            arrow_files = [str(temp_arrow)]
-            print(f"✓ Created temporary arrow file with {len(dataset)} samples")
+            if existing_arrow_files:
+                # Use existing .arrow files in the directory
+                arrow_files = [str(f) for f in existing_arrow_files]
+                print(f"✓ Found {len(arrow_files)} existing .arrow files")
+            else:
+                # Load dataset and create temporary arrow file if needed
+                from datasets import Dataset
+                dataset = Dataset.load_from_disk(arrow_path)
+                
+                if test_samples and len(dataset) > test_samples:
+                    import random
+                    random.seed(42)
+                    indices = random.sample(range(len(dataset)), test_samples)
+                    dataset = dataset.select(indices)
+                
+                temp_arrow_dir = arrow_path_obj / "temp_test"
+                # Use save_to_disk() to create dataset directory, then find the .arrow file
+                dataset.save_to_disk(str(temp_arrow_dir))
+                # Find the actual .arrow file in the saved directory
+                saved_arrow_files = list(temp_arrow_dir.glob("*.arrow"))
+                if saved_arrow_files:
+                    arrow_files = [str(f) for f in saved_arrow_files]
+                    print(f"✓ Created temporary dataset with {len(dataset)} samples")
+                else:
+                    raise ValueError("Failed to create temporary arrow file")
         else:
             raise ValueError(f"Invalid arrow path: {arrow_path}")
         
@@ -196,11 +204,12 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
             tensor_count = sum(1 for v in sample.values() if hasattr(v, 'shape'))
             print(f"✓ Output sample validation: {tensor_count} tensors")
         
-        # Cleanup temp file
+        # Cleanup temp directory
         if arrow_path_obj.is_dir():
-            temp_arrow = arrow_path_obj / "temp_test.arrow"
-            if temp_arrow.exists():
-                temp_arrow.unlink()  # Remove file, not directory
+            temp_arrow_dir = arrow_path_obj / "temp_test"
+            if temp_arrow_dir.exists():
+                import shutil
+                shutil.rmtree(temp_arrow_dir)
                 print("✓ Cleaned up temporary files")
         
         return True
