@@ -70,6 +70,13 @@ class TestTasteDetokenize:
         model.speech_decoder.speech_embedding = Mock()
         model.speech_decoder.speech_embedding.weight = torch.randn(1001, 256, device=DEVICE)
         
+        # Mock voice_decoder_generate method
+        model.voice_decoder_generate = Mock()
+        model.voice_decoder_generate.return_value = {
+            'speech_token_ids': torch.tensor([[100, 101, 102]], device=DEVICE),
+            'speech_token_lengths': torch.tensor([3], device=DEVICE)
+        }
+        
         processor = Mock()
         processor.get_generator = Mock()
         
