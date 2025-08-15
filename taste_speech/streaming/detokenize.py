@@ -128,6 +128,8 @@ def taste_detokenize(
         # Step 6: Resample to target sampling rate if needed
         if original_sr != out_sampling_rate:
             import torchaudio
+            # Ensure tts_speech is on the same device as the resampler
+            tts_speech = tts_speech.to(device)
             resampler = torchaudio.transforms.Resample(original_sr, out_sampling_rate).to(device)
             tts_speech = resampler(tts_speech)
         

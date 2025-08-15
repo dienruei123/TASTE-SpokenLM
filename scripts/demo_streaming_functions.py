@@ -61,9 +61,23 @@ def main():
         )
         
         # Extract necessary components
-        speaker_embeds = torch.tensor(processed_data['speaker_embeds']).to(device)
-        asr_token_ids = torch.tensor(processed_data['asr_token_ids']).to(device)
-        asr_word_ids = torch.tensor(processed_data['asr_word_ids']).to(device)
+        speaker_embeds = processed_data['speaker_embeds']
+        if isinstance(speaker_embeds, torch.Tensor):
+            speaker_embeds = speaker_embeds.clone().detach().to(device)
+        else:
+            speaker_embeds = torch.from_numpy(speaker_embeds).to(device)
+            
+        asr_token_ids = processed_data['asr_token_ids']
+        if isinstance(asr_token_ids, torch.Tensor):
+            asr_token_ids = asr_token_ids.clone().detach().to(device)
+        else:
+            asr_token_ids = torch.from_numpy(asr_token_ids).to(device)
+            
+        asr_word_ids = processed_data['asr_word_ids']
+        if isinstance(asr_word_ids, torch.Tensor):
+            asr_word_ids = asr_word_ids.clone().detach().to(device)
+        else:
+            asr_word_ids = torch.from_numpy(asr_word_ids).to(device)
         
         # Load the actual audio waveform
         audio_waveform, orig_sr = torchaudio.load(audio_path)
