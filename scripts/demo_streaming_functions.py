@@ -146,7 +146,7 @@ def main():
             # Extract current chunk
             current_text_ids = asr_token_ids[:, chunk_start:chunk_end]
             current_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
-            current_word_ids = asr_word_ids[:, chunk_start:chunk_end] if asr_word_ids.shape[1] > chunk_start else torch.empty(1, 0, dtype=torch.long, device=device)
+            current_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
             
             # Call taste_detokenize with previous context
             result = taste_detokenize(
