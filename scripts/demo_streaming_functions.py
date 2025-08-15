@@ -190,6 +190,13 @@ def main():
             print(f"    - Updated prev_text_ids shape: {prev_text_ids.shape}")
             print(f"    - Updated prev_taste_ids shape: {prev_taste_ids.shape}")
             print(f"    - Cumulative audio_ms: {prev_audio_ms}")
+
+            print(f"  Save...")
+            output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
+            output_sr = result['sampling_rate']  # Use the last result's sampling rate
+            output_audio_cpu = output_audio.cpu()
+            torchaudio.save(f'tmp_{i}.wav', output_audio_cpu, output_sr)
+            print(f"✓ Output audio saved to tmp_{i}.wav")
         
         # Merge all audio chunks
         print(f"  Merging {len(all_audio_chunks)} audio chunks...")

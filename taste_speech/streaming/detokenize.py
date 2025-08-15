@@ -206,11 +206,7 @@ def taste_detokenize(
             # Calculate samples corresponding to previous audio duration
             prev_samples = int(prev_audio_ms * out_sampling_rate / 1000)
             # Crop to keep only current chunk
-            if tts_speech.shape[1] > prev_samples:
-                tts_speech = tts_speech[:, prev_samples:]
-            else:
-                # If generated audio is shorter than expected, return silence
-                tts_speech = torch.zeros(1, 0, device=device, dtype=tts_speech.dtype)
+            tts_speech = tts_speech[:, prev_samples:]
         
         # Step 8: Calculate duration of current chunk
         chunk_duration_ms = int(tts_speech.shape[1] * 1000 / out_sampling_rate)

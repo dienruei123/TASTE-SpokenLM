@@ -1625,10 +1625,21 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         offset = 0
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
         for i in range(max_len):
-            y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(speech_lm_input, offset=0, required_cache_size=-1, att_cache=att_cache, cnn_cache=cnn_cache,
-                                                                  att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool))
+            y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
+                speech_lm_input, 
+                offset=0, 
+                required_cache_size=-1, 
+                att_cache=att_cache, 
+                cnn_cache=cnn_cache,
+                att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
+            )
             logp = self.speech_decoder.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
-            top_ids = self.speech_decoder.sampling_ids(logp.squeeze(dim=0), sampling, beam_size, ignore_eos=True if i < min_len else False).item()
+            top_ids = self.speech_decoder.sampling_ids(
+                logp.squeeze(dim=0), 
+                sampling, 
+                beam_size, 
+                ignore_eos=True if i < min_len else False
+            ).item()
             if top_ids == self.speech_decoder.speech_token_size:
                 break
             out_tokens.append(top_ids)
