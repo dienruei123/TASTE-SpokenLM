@@ -1558,13 +1558,14 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 speech_labels=decoded['labels'],
             )
 
-    def _voice_decoder_generate(
+    def voice_decoder_generate(
             self,
             speaker_embeds,
             audio_unit_embeds,
             audio_unit_lengths,
             asr_token_ids,
-            asr_token_lengths
+            asr_token_lengths,
+            prev_speech_ids=None
         ):
 
         # prepare conditional embeds
@@ -1584,12 +1585,20 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         )
 
         # prepare lm_input
-        speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+        components = [
             sos_eos_emb,
             speaker_embeds, 
             audio_text_token_encoded,
             audio_text_token_len, 
-            task_id_emb,
+            task_id_emb
+        ]
+        if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
+            # Convert previous speech IDs to embeddings
+            prev_speech_embeds = self.speech_decoder.speech_embedding(prev_speech_ids)
+            components.append(prev_speech_embeds)
+        
+        speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+            *components,
             padding_side='right'
         )
 
@@ -1782,7 +1791,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
             asr_token_lengths=asr_token_lengths,
             asr_word_ids=asr_word_ids
         )
-        results = self._voice_decoder_generate(
+        results = self.voice_decoder_generate(
             speaker_embeds,
             audio_unit_embeds,
             audio_unit_lengths,
@@ -1849,7 +1858,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 taste_logits=lm_outputs['taste_logits'], taste_labels=lm_outputs['taste_labels'],
                 asr_token_lengths=asr_token_lengths, asr_word_ids=asr_word_ids)
 
-        results = self._voice_decoder_generate(
+        results = self.voice_decoder_generate(
             speaker_embeds,
             audio_unit_embeds,
             audio_unit_lengths,
