@@ -269,19 +269,49 @@ def _voice_decoder_generate_extended(
     att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
     
     # Generation loop
+    print(f"[DEBUG GENERATION] Starting generation loop, max_len: {max_len}, initial_offset: {initial_offset}")
+    print(f"[DEBUG GENERATION] Initial speech_lm_input shape: {speech_lm_input.shape}")
+    print(f"[DEBUG GENERATION] Initial att_cache shape: {att_cache.shape}")
+    print(f"[DEBUG GENERATION] Initial cnn_cache shape: {cnn_cache.shape}")
+    
     for i in range(max_len):
-        y_pred, att_cache, cnn_cache = model.speech_decoder.llm.forward_chunk(
-            speech_lm_input, offset=offset, required_cache_size=-1, 
-            att_cache=att_cache, cnn_cache=cnn_cache,
-            att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
-        )
+        print(f"[DEBUG GENERATION] Iteration {i}, offset: {offset}")
+        print(f"[DEBUG GENERATION] speech_lm_input shape: {speech_lm_input.shape}")
+        print(f"[DEBUG GENERATION] att_cache shape: {att_cache.shape}")
+        print(f"[DEBUG GENERATION] cnn_cache shape: {cnn_cache.shape}")
+        
+        att_mask = torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
+        print(f"[DEBUG GENERATION] att_mask shape: {att_mask.shape}")
+        
+        try:
+            y_pred, att_cache, cnn_cache = model.speech_decoder.llm.forward_chunk(
+                speech_lm_input, offset=offset, required_cache_size=-1, 
+                att_cache=att_cache, cnn_cache=cnn_cache,
+                att_mask=att_mask
+            )
+        except Exception as e:
+            print(f"[DEBUG GENERATION] Exception in forward_chunk at iteration {i}: {e}")
+            print(f"[DEBUG GENERATION] speech_lm_input.shape: {speech_lm_input.shape}")
+            print(f"[DEBUG GENERATION] offset: {offset}")
+            print(f"[DEBUG GENERATION] att_cache.shape: {att_cache.shape}")
+            print(f"[DEBUG GENERATION] cnn_cache.shape: {cnn_cache.shape}")
+            raise e
+            
+        print(f"[DEBUG GENERATION] After forward_chunk, y_pred shape: {y_pred.shape}")
+        print(f"[DEBUG GENERATION] New att_cache shape: {att_cache.shape}")
+        print(f"[DEBUG GENERATION] New cnn_cache shape: {cnn_cache.shape}")
+        
         logp = model.speech_decoder.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
         top_ids = model.speech_decoder.sampling_ids(logp.squeeze(dim=0), sampling, beam_size, ignore_eos=True if i < min_len else False).item()
+        print(f"[DEBUG GENERATION] Generated token: {top_ids}")
+        
         if top_ids == model.speech_decoder.speech_token_size:
+            print(f"[DEBUG GENERATION] EOS token reached, breaking")
             break
         out_tokens.append(top_ids)
         offset += speech_lm_input.size(1)
         speech_lm_input = model.speech_decoder.speech_embedding.weight[top_ids].reshape(1, 1, -1)
+        print(f"[DEBUG GENERATION] Updated offset: {offset}, new speech_lm_input shape: {speech_lm_input.shape}")
 
     # Combine with previous speech tokens if they exist
     if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
