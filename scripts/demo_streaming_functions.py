@@ -17,15 +17,62 @@ from taste_speech import TasteForCausalLM, TasteProcessor
 from taste_speech.streaming import taste_tokenize, taste_detokenize
 
 
+def create_word_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, words_per_chunk=2):
+    """
+    Create chunks based on word boundaries using word_ids.
+    
+    Args:
+        asr_token_ids: ASR token IDs tensor of shape (1, seq_len)
+        asr_word_ids: Word IDs tensor of shape (1, seq_len) 
+        taste_tokens: TASTE tokens tensor of shape (1, seq_len, vq_dim)
+        words_per_chunk: Number of words to include in each chunk
+        
+    Returns:
+        List of tuples: [(chunk_asr_tokens, chunk_asr_word_ids, chunk_taste_tokens), ...]
+    """
+    chunks = []
+    seq_len = asr_token_ids.shape[1]
+    
+    # Find unique word IDs and their positions
+    word_ids_flat = asr_word_ids.squeeze(0)  # Remove batch dimension
+    unique_word_ids = torch.unique(word_ids_flat, sorted=True)
+    
+    # Group tokens by words_per_chunk
+    for i in range(0, len(unique_word_ids), words_per_chunk):
+        # Get word IDs for this chunk
+        chunk_word_ids = unique_word_ids[i:i + words_per_chunk]
+        
+        # Find token positions that belong to these words
+        token_mask = torch.isin(word_ids_flat, chunk_word_ids)
+        token_indices = torch.where(token_mask)[0]
+        
+        if len(token_indices) == 0:
+            continue
+            
+        # Extract chunk data
+        start_idx = token_indices[0].item()
+        end_idx = token_indices[-1].item() + 1
+        
+        chunk_asr_tokens = asr_token_ids[:, start_idx:end_idx]
+        chunk_asr_word_ids = asr_word_ids[:, start_idx:end_idx]
+        chunk_taste_tokens = taste_tokens[:, start_idx:end_idx, :]
+        
+        chunks.append((chunk_asr_tokens, chunk_asr_word_ids, chunk_taste_tokens))
+        
+    return chunks
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
     parser.add_argument('--no-chunk', action='store_true', 
                         help='Disable chunking in step 4 (process all tokens at once)')
+    parser.add_argument('--words-per-chunk', type=int, default=2,
+                        help='Number of words per chunk when using word-based chunking (default: 2)')
     args = parser.parse_args()
     
     print("=== TASTE Streaming Functions Demo ===")
-    print(f"Chunking mode: {'DISABLED' if args.no_chunk else 'ENABLED'}")
+    print(f"Chunking mode: {'DISABLED' if args.no_chunk else f'ENABLED (word-based, {args.words_per_chunk} words per chunk)'}")
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
@@ -156,13 +203,18 @@ def main():
             traceback.print_exc()
             return
     else:
-        print("\n4. Converting TASTE tokens back to audio with chunking...")
+        print("\n4. Converting TASTE tokens back to audio with word-based chunking...")
         try:
-            # Configuration for chunking
-            chunk_size = max(1, asr_token_ids.shape[1] // 3)  # Split into ~3 chunks
+            # Create word-based chunks
+            word_chunks = create_word_based_chunks(
+                asr_token_ids, asr_word_ids, taste_tokens, 
+                words_per_chunk=args.words_per_chunk
+            )
+            
             print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
             print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
-            print(f"  - Chunk size: {chunk_size}")
+            print(f"  - Total word-based chunks: {len(word_chunks)}")
+            print(f"  - Words per chunk: {args.words_per_chunk}")
             
             # Initialize previous context (empty at start)
             prev_asr_token_ids = torch.empty(1, 0, dtype=torch.long, device=device)
@@ -175,19 +227,11 @@ def main():
             all_audio_chunks = []
             total_duration_ms = 0
             
-            # Process in chunks
-            for i in range(0, asr_token_ids.shape[1], chunk_size):
-                chunk_start = i
-                chunk_end = min(i + chunk_size, asr_token_ids.shape[1])
-                chunk_num = i // chunk_size + 1
-                total_chunks = (asr_token_ids.shape[1] + chunk_size - 1) // chunk_size
-                
-                print(f"  Processing chunk {chunk_num}/{total_chunks} (tokens {chunk_start}:{chunk_end})")
-                
-                # Extract current chunk
-                current_asr_token_ids = asr_token_ids[:, chunk_start:chunk_end]
-                current_asr_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
-                current_asr_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
+            # Process word-based chunks
+            for chunk_num, (current_asr_token_ids, current_asr_word_ids, current_asr_taste_ids) in enumerate(word_chunks, 1):
+                print(f"  Processing word chunk {chunk_num}/{len(word_chunks)}")
+                print(f"    - Chunk tokens shape: {current_asr_token_ids.shape}")
+                print(f"    - Chunk word_ids: {torch.unique(current_asr_word_ids).tolist()}")
                 
                 # Call taste_detokenize with previous context
                 result = taste_detokenize(
@@ -236,15 +280,15 @@ def main():
                 output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
                 output_sr = result['sampling_rate']  # Use the last result's sampling rate
                 output_audio_cpu = output_audio.cpu()
-                torchaudio.save(f'tmp_{i}.wav', output_audio_cpu, output_sr)
-                print(f"✓ Output audio saved to tmp_{i}.wav")
+                torchaudio.save(f'tmp_chunk_{chunk_num}.wav', output_audio_cpu, output_sr)
+                print(f"✓ Output audio saved to tmp_chunk_{chunk_num}.wav")
             
             # Merge all audio chunks
             print(f"  Merging {len(all_audio_chunks)} audio chunks...")
             output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
             output_sr = result['sampling_rate']  # Use the last result's sampling rate
             
-            print(f"✓ Chunked audio detokenized successfully")
+            print(f"✓ Word-based chunked audio detokenized successfully")
             print(f"  - Final output audio shape: {output_audio.shape}")
             print(f"  - Output sampling rate: {output_sr}")
             print(f"  - Total duration: {total_duration_ms} ms")
@@ -279,9 +323,10 @@ def main():
         print(f"Successfully tested non-chunked processing!")
         print(f"All tokens were processed at once without chunking.")
     else:
-        print(f"Successfully tested chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
-        print(f"The chunked approach simulates real streaming conditions where")
-        print(f"previous context is maintained across multiple detokenization calls.")
+        print(f"Successfully tested word-based chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
+        print(f"The word-based chunked approach simulates real streaming conditions where")
+        print(f"previous context is maintained across multiple detokenization calls, with chunks")
+        print(f"aligned to word boundaries for more natural speech synthesis.")
     print(f"You can now listen to the original audio ({audio_path}) and")
     print(f"the reconstructed audio ({output_path}) to compare the quality.")
 
