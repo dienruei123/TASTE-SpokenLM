@@ -66,14 +66,6 @@ def taste_detokenize(
     
     with torch.no_grad():
         # Step 1: Build complete text and TASTE token sequences
-        print(f"[DEBUG] prev_text_ids shape: {prev_text_ids.shape}, text_ids shape: {text_ids.shape}")
-        print(f"[DEBUG] prev_taste_ids shape: {prev_taste_ids.shape}, taste_ids shape: {taste_ids.shape}")
-        print(f"[DEBUG] text_word_ids shape: {text_word_ids.shape}")
-        if prev_text_word_ids is not None:
-            print(f"[DEBUG] prev_text_word_ids shape: {prev_text_word_ids.shape}")
-            print(f"[DEBUG] prev_text_word_ids values: {prev_text_word_ids}")
-        print(f"[DEBUG] text_word_ids values: {text_word_ids}")
-        
         if prev_text_ids.numel() > 0:
             full_text_ids = torch.cat([prev_text_ids, text_ids], dim=1)
             full_taste_ids = torch.cat([prev_taste_ids, taste_ids], dim=1)
@@ -82,10 +74,8 @@ def taste_detokenize(
             if prev_text_word_ids is not None:
                 max_prev_word_id = prev_text_word_ids.max().item()
                 min_current_word_id = text_word_ids.min().item()
-                print(f"[DEBUG] max_prev_word_id: {max_prev_word_id}, min_current_word_id: {min_current_word_id}")
                 # Adjust current word IDs to continue from previous max + 1
                 adjusted_text_word_ids = text_word_ids - min_current_word_id + max_prev_word_id + 1
-                print(f"[DEBUG] adjusted_text_word_ids: {adjusted_text_word_ids}")
                 full_text_word_ids = torch.cat([prev_text_word_ids, adjusted_text_word_ids], dim=1)
             else:
                 full_text_word_ids = text_word_ids
@@ -93,12 +83,6 @@ def taste_detokenize(
             full_text_ids = text_ids
             full_taste_ids = taste_ids
             full_text_word_ids = text_word_ids
-            
-        print(f"[DEBUG] full_text_ids shape: {full_text_ids.shape}")
-        print(f"[DEBUG] full_taste_ids shape: {full_taste_ids.shape}")  
-        print(f"[DEBUG] full_text_word_ids shape: {full_text_word_ids.shape}")
-        print(f"[DEBUG] full_text_word_ids values: {full_text_word_ids}")
-        print(f"[DEBUG] full_text_word_ids max: {full_text_word_ids.max().item()}")
         
         # Move to device
         full_text_ids = full_text_ids.to(device)
@@ -112,32 +96,13 @@ def taste_detokenize(
         asr_word_ids = full_text_word_ids
         
         # Step 3: Get audio unit embeddings from TASTE tokens
-        print(f"[DEBUG] About to call get_audio_embeds_from_taste")
-        print(f"[DEBUG] asr_token_ids (full_text_ids) shape: {asr_token_ids.shape}")
-        print(f"[DEBUG] asr_token_lengths: {asr_token_lengths}")
-        print(f"[DEBUG] asr_word_ids (full_text_word_ids) shape: {asr_word_ids.shape}")
-        print(f"[DEBUG] asr_word_ids values: {asr_word_ids}")
-        print(f"[DEBUG] full_taste_ids shape: {full_taste_ids.shape}")
-        print(f"[DEBUG] full_taste_ids first few values: {full_taste_ids[0, :5, :]}")
-        
         vq_module = model.audio_tower.vq.rvq
-        try:
-            audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
-                vq_module=vq_module,
-                taste_preds=full_taste_ids,
-                asr_token_lengths=asr_token_lengths,
-                asr_word_ids=asr_word_ids
-            )
-        except Exception as e:
-            print(f"[DEBUG] Exception in get_audio_embeds_from_taste: {e}")
-            print(f"[DEBUG] Expected: single_reduced_taste_preds.size(0) == int(single_asr_word_ids[-1]) + 1")
-            print(f"[DEBUG] Actual: full_taste_ids non-ignored size vs asr_word_ids max + 1")
-            # Let's check what the actual sizes are
-            seq_mask = full_taste_ids[0, :, 0] != -100  # IGNORE_ID is typically -100
-            single_reduced_taste_preds = full_taste_ids[0, seq_mask, :].long()
-            print(f"[DEBUG] single_reduced_taste_preds.size(0): {single_reduced_taste_preds.size(0)}")
-            print(f"[DEBUG] int(asr_word_ids[0, -1]) + 1: {int(asr_word_ids[0, -1]) + 1}")
-            raise e
+        audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
+            vq_module=vq_module,
+            taste_preds=full_taste_ids,
+            asr_token_lengths=asr_token_lengths,
+            asr_word_ids=asr_word_ids
+        )
         
         # Step 4: Generate speech tokens using extended voice decoder
         speech_decoder_results = _voice_decoder_generate_extended(
@@ -269,49 +234,19 @@ def _voice_decoder_generate_extended(
     att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
     
     # Generation loop
-    print(f"[DEBUG GENERATION] Starting generation loop, max_len: {max_len}, initial_offset: {initial_offset}")
-    print(f"[DEBUG GENERATION] Initial speech_lm_input shape: {speech_lm_input.shape}")
-    print(f"[DEBUG GENERATION] Initial att_cache shape: {att_cache.shape}")
-    print(f"[DEBUG GENERATION] Initial cnn_cache shape: {cnn_cache.shape}")
-    
     for i in range(max_len):
-        print(f"[DEBUG GENERATION] Iteration {i}, offset: {offset}")
-        print(f"[DEBUG GENERATION] speech_lm_input shape: {speech_lm_input.shape}")
-        print(f"[DEBUG GENERATION] att_cache shape: {att_cache.shape}")
-        print(f"[DEBUG GENERATION] cnn_cache shape: {cnn_cache.shape}")
-        
-        att_mask = torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
-        print(f"[DEBUG GENERATION] att_mask shape: {att_mask.shape}")
-        
-        try:
-            y_pred, att_cache, cnn_cache = model.speech_decoder.llm.forward_chunk(
-                speech_lm_input, offset=offset, required_cache_size=-1, 
-                att_cache=att_cache, cnn_cache=cnn_cache,
-                att_mask=att_mask
-            )
-        except Exception as e:
-            print(f"[DEBUG GENERATION] Exception in forward_chunk at iteration {i}: {e}")
-            print(f"[DEBUG GENERATION] speech_lm_input.shape: {speech_lm_input.shape}")
-            print(f"[DEBUG GENERATION] offset: {offset}")
-            print(f"[DEBUG GENERATION] att_cache.shape: {att_cache.shape}")
-            print(f"[DEBUG GENERATION] cnn_cache.shape: {cnn_cache.shape}")
-            raise e
-            
-        print(f"[DEBUG GENERATION] After forward_chunk, y_pred shape: {y_pred.shape}")
-        print(f"[DEBUG GENERATION] New att_cache shape: {att_cache.shape}")
-        print(f"[DEBUG GENERATION] New cnn_cache shape: {cnn_cache.shape}")
-        
+        y_pred, att_cache, cnn_cache = model.speech_decoder.llm.forward_chunk(
+            speech_lm_input, offset=offset, required_cache_size=-1, 
+            att_cache=att_cache, cnn_cache=cnn_cache,
+            att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
+        )
         logp = model.speech_decoder.llm_decoder(y_pred[:, -1]).log_softmax(dim=-1)
         top_ids = model.speech_decoder.sampling_ids(logp.squeeze(dim=0), sampling, beam_size, ignore_eos=True if i < min_len else False).item()
-        print(f"[DEBUG GENERATION] Generated token: {top_ids}")
-        
         if top_ids == model.speech_decoder.speech_token_size:
-            print(f"[DEBUG GENERATION] EOS token reached, breaking")
             break
         out_tokens.append(top_ids)
         offset += speech_lm_input.size(1)
         speech_lm_input = model.speech_decoder.speech_embedding.weight[top_ids].reshape(1, 1, -1)
-        print(f"[DEBUG GENERATION] Updated offset: {offset}, new speech_lm_input shape: {speech_lm_input.shape}")
 
     # Combine with previous speech tokens if they exist
     if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
