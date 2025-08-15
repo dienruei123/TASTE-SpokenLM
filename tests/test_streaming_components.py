@@ -150,10 +150,16 @@ class TestTasteTokenize:
         mock_param.dtype = torch.float32
         model.parameters = Mock(return_value=iter([mock_param]))
         
+        def mock_audio_tower(**kwargs):
+            # Get sequence length from asr_token_ids to ensure alignment
+            asr_token_ids = kwargs.get('asr_token_ids')
+            seq_len = asr_token_ids.shape[1]
+            return {
+                'quantized_indices': torch.randint(0, 1024, (1, seq_len, 4), device=DEVICE)
+            }
+        
         model.audio_tower = Mock()
-        model.audio_tower.return_value = {
-            'quantized_indices': torch.randint(0, 1024, (1, 10, 4), device=DEVICE)
-        }
+        model.audio_tower.side_effect = mock_audio_tower
         
         processor = Mock()
         processor.whisper_feature_extractor = Mock()
@@ -196,7 +202,7 @@ class TestTasteTokenize:
         with pytest.raises(TypeError, match="audio must be a torch.Tensor"):
             taste_tokenize(model, processor, [1, 2, 3], torch.tensor([[1, 2, 3]]))
         
-        with pytest.raises(TypeError, match="text_ids must be a torch.Tensor"):
+        with pytest.raises(TypeError, match="token_ids must be a torch.Tensor"):
             taste_tokenize(model, processor, torch.randn(1, 1000, device=DEVICE), [1, 2, 3])
 
 
