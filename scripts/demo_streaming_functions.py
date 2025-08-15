@@ -90,6 +90,7 @@ def main():
             processor=processor,
             audio=audio_waveform,
             token_ids=asr_token_ids,
+            word_ids=asr_word_ids,
             sampling_rate=sampling_rate
         )
         print(f"✓ Audio tokenized successfully")

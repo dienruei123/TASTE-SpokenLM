@@ -16,6 +16,7 @@ def taste_tokenize(
     processor: "TasteProcessor", 
     audio: torch.Tensor,
     token_ids: torch.Tensor,
+    word_ids: torch.Tensor,
     sampling_rate: int = 16000
 ) -> torch.Tensor:
     """
@@ -29,6 +30,7 @@ def taste_tokenize(
         processor: TasteProcessor with feature extraction capabilities
         audio: Input audio waveform tensor of shape (1, num_samples) 
         token_ids: Text token IDs tensor of shape (1, seq_len)
+        word_ids: Word ID tensor for word-level alignment (1, seq_len). Required for joint encoder segmenter.
         sampling_rate: Input audio sampling rate in Hz (will be resampled to 16000 if different)
     
     Returns:
@@ -77,8 +79,8 @@ def taste_tokenize(
         )
         
         # Convert to tensors and move to device
-        audio_features = torch.tensor(audio_features, dtype=dtype, device=device)
-        audio_feature_lengths = torch.tensor(audio_feature_lengths, dtype=torch.long, device=device)
+        audio_features = audio_features.clone().detach().to(dtype=dtype, device=device)
+        audio_feature_lengths = audio_feature_lengths.clone().detach().to(dtype=torch.long, device=device)
         
         # Step 2: Prepare ASR token inputs (use token_ids as ASR tokens for alignment)
         asr_token_ids = token_ids
@@ -91,6 +93,7 @@ def taste_tokenize(
             asr_token_lengths=asr_token_lengths,
             audio_features=audio_features,
             audio_feature_lengths=audio_feature_lengths,
+            word_ids=word_ids,
         )
         
         # Step 4: Extract quantized indices (TASTE tokens)
