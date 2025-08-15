@@ -3,6 +3,7 @@ TASTE detokenization: Convert TASTE tokens to audio waveforms with context conti
 """
 
 import torch
+import torchaudio
 from typing import Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ def taste_detokenize(
             # Handle word_ids concatenation with proper indexing
             if prev_text_word_ids is not None:
                 max_prev_word_id = prev_text_word_ids.max().item()
-                adjusted_text_word_ids = text_word_ids - text_word_ids.max().item() + max_prev_word_id + 1
+                min_current_word_id = text_word_ids.min().item()
+                # Adjust current word IDs to continue from previous max + 1
+                adjusted_text_word_ids = text_word_ids - min_current_word_id + max_prev_word_id + 1
                 full_text_word_ids = torch.cat([prev_text_word_ids, adjusted_text_word_ids], dim=1)
             else:
                 full_text_word_ids = text_word_ids
@@ -127,7 +130,6 @@ def taste_detokenize(
         
         # Step 6: Resample to target sampling rate if needed
         if original_sr != out_sampling_rate:
-            import torchaudio
             # Ensure tts_speech is on the same device as the resampler
             tts_speech = tts_speech.to(device)
             resampler = torchaudio.transforms.Resample(original_sr, out_sampling_rate).to(device)

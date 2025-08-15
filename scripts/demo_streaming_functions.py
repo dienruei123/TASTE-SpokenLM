@@ -127,6 +127,7 @@ def main():
         prev_text_ids = torch.empty(1, 0, dtype=torch.long, device=device)
         prev_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)  
         prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+        prev_text_word_ids = None
         prev_audio_ms = 0
         
         # Storage for merged outputs
@@ -159,6 +160,7 @@ def main():
                 text_ids=current_text_ids,
                 taste_ids=current_taste_ids,
                 text_word_ids=current_word_ids,
+                prev_text_word_ids=prev_text_word_ids,
                 out_sampling_rate=sampling_rate
             )
             
@@ -174,6 +176,10 @@ def main():
             # Update previous context for next iteration
             prev_text_ids = torch.cat([prev_text_ids, current_text_ids], dim=1)
             prev_taste_ids = torch.cat([prev_taste_ids, current_taste_ids], dim=1)
+            if prev_text_word_ids is None:
+                prev_text_word_ids = current_word_ids
+            else:
+                prev_text_word_ids = torch.cat([prev_text_word_ids, current_word_ids], dim=1)
             if 'speech_ids' in result:
                 if prev_speech_ids.shape[1] == 0:
                     prev_speech_ids = result['speech_ids']
