@@ -135,14 +135,9 @@ def main():
                 model=model,
                 processor=processor,
                 speaker_embeds=speaker_embeds,
-                prev_text_ids=torch.empty(1, 0, dtype=torch.long, device=device),
-                prev_taste_ids=torch.empty(1, 0, 4, dtype=torch.long, device=device),
-                prev_speech_ids=torch.empty(1, 0, dtype=torch.long, device=device),
-                prev_audio_ms=0,
                 text_ids=asr_token_ids,
                 taste_ids=taste_tokens,
                 text_word_ids=asr_word_ids,
-                prev_text_word_ids=None,
                 out_sampling_rate=sampling_rate
             )
             

@@ -145,19 +145,16 @@ def taste_detokenize(
             prev_taste_ids = prev_taste_ids.to(device)
         if prev_text_word_ids is not None:
             prev_text_word_ids = prev_text_word_ids.to(device)
-        
-        # Step 2: Prepare ASR tokens (use text tokens as ASR tokens for alignment)
-        asr_token_ids = full_text_ids
-        asr_token_lengths = torch.tensor([full_text_ids.shape[1]], device=device, dtype=torch.long)
-        asr_word_ids = full_text_word_ids
+
+        full_token_lengths = torch.tensor([full_text_ids.shape[1]], device=device, dtype=torch.long)
         
         # Step 3: Get audio unit embeddings from TASTE tokens
         vq_module = model.audio_tower.vq.rvq
         audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
             vq_module=vq_module,
             taste_preds=full_taste_ids,
-            asr_token_lengths=asr_token_lengths,
-            asr_word_ids=asr_word_ids
+            asr_token_lengths=full_token_lengths,
+            asr_word_ids=full_text_word_ids
         )
         
         # Step 4: Generate speech tokens using extended voice decoder
@@ -165,8 +162,8 @@ def taste_detokenize(
             speaker_embeds=speaker_embeds,
             audio_unit_embeds=audio_unit_embeds,
             audio_unit_lengths=audio_unit_lengths,
-            asr_token_ids=asr_token_ids,
-            asr_token_lengths=asr_token_lengths,
+            asr_token_ids=full_taste_ids,
+            asr_token_lengths=full_token_lengths,
             prev_speech_ids=prev_speech_ids,
         )
 
