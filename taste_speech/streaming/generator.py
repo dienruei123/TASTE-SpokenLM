@@ -3,17 +3,171 @@ Streaming generation for TASTE-SpokenLM with Iterator pattern and threading supp
 """
 
 import torch
+import torch.nn.functional as F
 from typing import List, Dict, Iterator, Optional, Callable, TYPE_CHECKING
 from threading import Thread
 from queue import Queue, Empty
 import time
 
 from .segment import TASTESegment, StreamingResult
-from .conversation import build_conditional_prompt, check_completion_status
+from .conversation import build_conditional_prompt, check_completion_status, SPECIAL_TOKENS
 
 if TYPE_CHECKING:
     from ..modeling_taste import TasteForCausalLM
     from ..processing_taste import TasteProcessor
+
+
+class StreamingGenerationState:
+    """Encapsulates the state for streaming generation."""
+    
+    def __init__(self, device, llm_embed_tokens, generated_text_tokens=None, generated_taste_tokens=None):
+        self.device = device
+        self.llm_embed_tokens = llm_embed_tokens
+        self.generated_text_tokens = generated_text_tokens or []
+        self.generated_taste_tokens = generated_taste_tokens or []
+        self.generation_step = 0
+        
+    def add_text_token(self, text_id, action):
+        """Add text token if action is valid."""
+        if action not in ('wait_for_taste', 'terminate'):
+            self.generated_text_tokens.append(text_id)
+            
+    def add_taste_token(self, taste_ids, taste_action):
+        """Add taste token if sampled."""
+        if taste_action == 'sample':
+            self.generated_taste_tokens.append(taste_ids.squeeze(0).squeeze(0))
+            
+    def has_generated_tokens(self):
+        """Check if any tokens have been generated."""
+        return bool(self.generated_text_tokens)
+        
+    def increment_step(self):
+        """Increment generation step counter."""
+        self.generation_step += 1
+        
+
+def _get_model_components(model):
+    """Extract model components following the generate method pattern."""
+    if model.spoken_lm._use_lora:
+        base = model.spoken_lm.language_model.base_model.model
+    else:
+        base = model.spoken_lm.language_model
+
+    return {
+        'llm_embed_tokens': base.model.embed_tokens,
+        'llm_backbone': base.model,
+        'lm_head': base.lm_head,
+        'device': base.device,
+        'vq_module': model.audio_tower.vq.rvq
+    }
+
+
+def _setup_generation_state(model, processor, input_segments, text_top_p, taste_top_p, 
+                           text_temperature, repetition_penalty, eos_id):
+    """Setup initial generation state and model configuration."""
+    components = _get_model_components(model)
+    device = components['device']
+    
+    # Build conditional prompt
+    prompt_text_ids, prompt_taste_ids = build_conditional_prompt(
+        input_segments, processor.llm_tokenizer
+    )
+    prompt_text_ids = prompt_text_ids.to(device)
+    prompt_taste_ids = prompt_taste_ids.to(device)
+    
+    # Register and reset taste sampler
+    model.spoken_lm.register_taste_sampler(
+        llm_tokenizer=processor.llm_tokenizer,
+        text_top_p=text_top_p,
+        taste_top_p=taste_top_p,
+        text_temperature=text_temperature,
+        repetition_penalty=repetition_penalty,
+    )
+    model.spoken_lm.taste_sampler.reset(has_prefix=True, stop_id=eos_id)
+    
+    # Initialize generation state
+    inputs_embeds = components['llm_embed_tokens'](prompt_text_ids)
+    input_ids = prompt_text_ids.clone()
+    state = StreamingGenerationState(device, components['llm_embed_tokens'])
+    
+    return components, inputs_embeds, input_ids, state
+
+
+def _perform_forward_pass(llm_backbone, lm_head, model, inputs_embeds, vq_module):
+    """Perform forward pass through the model."""
+    llm_outputs = llm_backbone(
+        inputs_embeds=inputs_embeds,
+        attention_mask=None,
+        output_hidden_states=True,
+        return_dict='pt'
+    )
+    
+    text_logits = lm_head(llm_outputs.last_hidden_state)
+    taste_logits, _ = model.spoken_lm.extract_for_bridge_out_llm(llm_outputs, vq_module)
+    
+    return text_logits, taste_logits
+
+
+def _update_inputs_embeds(model, llm_embed_tokens, text_id, taste_ids, taste_action, 
+                         inputs_embeds, device, vq_module):
+    """Construct and update inputs_embeds for next iteration."""
+    if taste_action == 'sample':
+        # Use sampled taste for audio embedding
+        last_asr_embed = model.spoken_lm.encode_audio(taste_ids, vq_module)
+        new_inputs_embeds = model.spoken_lm.fuse_for_bridge_in_llm(
+            llm_embed_tokens.weight[text_id].reshape(1, 1, -1),
+            last_asr_embed
+        )
+    else:
+        # Use padding for non-taste tokens
+        new_inputs_embeds = model.spoken_lm.fuse_for_bridge_in_llm(
+            llm_embed_tokens.weight[text_id].reshape(1, 1, -1),
+            model.spoken_lm.pad_audio_unit_embed.reshape(1, 1, -1)
+        )
+    
+    # Update inputs_embeds with proper dtype
+    llm_dtype = next(llm_embed_tokens.parameters()).dtype
+    return torch.cat([inputs_embeds, new_inputs_embeds], dim=1).to(dtype=llm_dtype, device=device)
+
+
+def _create_segment_from_tokens(text_tokens, taste_tokens, device, is_complete, reason):
+    """Create TASTESegment and result from generated tokens."""
+    if not text_tokens:
+        return None
+        
+    gen_text_ids = torch.tensor([text_tokens], device=device, dtype=torch.long)
+    
+    if taste_tokens:
+        gen_taste_ids = torch.stack(taste_tokens).unsqueeze(0)
+    else:
+        gen_taste_ids = torch.empty(1, len(text_tokens), 4, device=device, dtype=torch.long)
+    
+    segment = TASTESegment(
+        role='assistant',
+        modality='audio',
+        text_ids=gen_text_ids,
+        taste_ids=gen_taste_ids
+    )
+    
+    return {
+        'is_complete': is_complete,
+        'completion_reason': reason,
+        'segment': segment
+    }
+
+
+def _should_emit_segment(completion_status, should_emit_segment, text_id, action, 
+                        generated_text_tokens):
+    """Determine if we should emit a segment."""
+    if completion_status.is_complete:
+        return True
+    elif should_emit_segment is not None:
+        return should_emit_segment(text_id, action, completion_status)
+    elif completion_status.reason == 'segment_end':
+        return True
+    else:
+        # Emit periodically for streaming experience (every ~10 tokens)
+        return len(generated_text_tokens) % 10 == 0 and len(generated_text_tokens) > 0
 
 
 def streaming_generate(
@@ -26,8 +180,7 @@ def streaming_generate(
     repetition_penalty: float = 1.1,
     max_length: int = 512,
     eos_id: Optional[int] = None,
-    should_emit_segment: Optional[Callable] = None,
-    extra_words: int = 32
+    should_emit_segment: Optional[Callable] = None
 ) -> Iterator[Dict]:
     """
     Streaming generation of conversation responses using Iterator pattern with threading.
@@ -46,7 +199,6 @@ def streaming_generate(
         max_length: Maximum generation length (default: 512)
         eos_id: End-of-sequence token ID (optional)
         should_emit_segment: Function to determine when to emit segments (optional)
-        extra_words: Extra words to generate beyond minimum (default: 32)
         
     Yields:
         Dict: StreamingResult with keys:
@@ -54,7 +206,13 @@ def streaming_generate(
             - completion_reason: str reason for completion
             - segment: TASTESegment containing generated content
     """
-    
+    # Set default eos_id to segment_end token if not provided
+    if eos_id is None:
+        segment_end_token = SPECIAL_TOKENS['segment_end']
+        segment_end_ids = processor.llm_tokenizer.encode(segment_end_token, add_special_tokens=False)
+        if segment_end_ids:
+            eos_id = segment_end_ids[0]   
+
     # Setup result queue for thread communication
     result_queue = Queue()
     exception_queue = Queue()
@@ -62,186 +220,125 @@ def streaming_generate(
     def _generation_worker():
         """Background worker thread for generation."""
         try:
-            device = model.device
-            
-            # Step 1: Build conditional prompt from input segments
-            prompt_text_ids, prompt_taste_ids = build_conditional_prompt(
-                input_segments, processor.llm_tokenizer
+            # Setup initial generation state
+            components, inputs_embeds, input_ids, state = _setup_generation_state(
+                model, processor, input_segments, text_top_p, taste_top_p, 
+                text_temperature, repetition_penalty, eos_id
             )
             
-            # Move to device
-            prompt_text_ids = prompt_text_ids.to(device)
-            prompt_taste_ids = prompt_taste_ids.to(device)
-            
-            # Step 2: Register TasteSampler with generation parameters
-            model.spoken_lm.register_taste_sampler(
-                llm_tokenizer=processor.llm_tokenizer,
-                text_top_p=text_top_p,
-                taste_top_p=taste_top_p,
-                text_temperature=text_temperature,
-                repetition_penalty=repetition_penalty,
-            )
-            
-            # Step 3: Reset sampler state
-            model.spoken_lm.taste_sampler.reset(
-                extra_words=extra_words,
-                has_prefix=True,
-                stop_id=eos_id
-            )
-            
-            # Step 4: Initialize generation state
-            current_text_ids = prompt_text_ids.clone()
-            current_taste_ids = prompt_taste_ids.clone()
-            generation_step = 0
-            max_steps = max_length
-            
-            # Track accumulated generation for segment emission
-            generated_text_tokens = []
-            generated_taste_tokens = []
+            device = components['device']
+            llm_embed_tokens = components['llm_embed_tokens']
+            llm_backbone = components['llm_backbone']
+            lm_head = components['lm_head']
+            vq_module = components['vq_module']
             
             with torch.no_grad():
-                # Step 5: Autoregressive generation loop
-                while generation_step < max_steps:
-                    
-                    # Prepare embeddings for forward pass
-                    # This follows the pattern from inference_completion
-                    inputs_embeds = model.spoken_lm.prepare_inputs_embeds(
-                        current_text_ids, current_taste_ids
+                # Main autoregressive generation loop
+                while state.generation_step < max_length:
+                    # Forward pass
+                    text_logits, taste_logits = _perform_forward_pass(
+                        llm_backbone, lm_head, model, inputs_embeds, vq_module
                     )
                     
-                    # Forward pass through the model
-                    outputs = model.spoken_lm.model(inputs_embeds=inputs_embeds)
-                    logits = outputs.logits
-                    
-                    # Extract text and taste logits 
-                    text_logits = logits[:, :, :len(processor.llm_tokenizer)]
-                    
-                    # Get taste logits (this depends on model architecture)
-                    # For now, use a placeholder - actual implementation would extract from model outputs
-                    taste_logits = torch.randn(1, current_text_ids.size(1), 4, 1024, device=device)
-                    
-                    # Step 6: Sample next tokens using TasteSampler
+                    # Sample next tokens
                     text_id, taste_ids, action, taste_action = model.spoken_lm.taste_sampler.update(
-                        text_logits, taste_logits, current_text_ids
+                        text_logits, taste_logits, input_ids=input_ids
                     )
                     
-                    # Convert text_id to tensor format
-                    next_text_id = torch.tensor([[text_id]], device=device, dtype=torch.long)
+                    # Update input_ids
+                    input_ids = torch.nn.functional.pad(input_ids, (0, 1), 'constant', text_id)
                     
-                    # Update current sequences
-                    current_text_ids = torch.cat([current_text_ids, next_text_id], dim=1)
-                    current_taste_ids = torch.cat([current_taste_ids, taste_ids], dim=1)
+                    # Update inputs_embeds for next iteration
+                    inputs_embeds = _update_inputs_embeds(
+                        model, llm_embed_tokens, text_id, taste_ids, taste_action, 
+                        inputs_embeds, device, vq_module
+                    )
                     
-                    # Track generated tokens (excluding prompt)
-                    generated_text_tokens.append(text_id)
-                    generated_taste_tokens.append(taste_ids.squeeze(0).squeeze(0))
+                    # Track generated tokens
+                    state.add_text_token(text_id, action)
+                    state.add_taste_token(taste_ids, taste_action)
                     
-                    # Step 7: Check completion status
+                    # Check completion status
                     completion_status = check_completion_status(text_id, action)
                     
-                    # Step 8: Determine if we should emit a segment
-                    should_emit = False
-                    if completion_status.is_complete:
-                        should_emit = True
-                    elif should_emit_segment is not None:
-                        should_emit = should_emit_segment(text_id, action, completion_status)
-                    elif completion_status.reason == 'segment_end':
-                        should_emit = True
-                    else:
-                        # Emit periodically for streaming experience (every ~10 tokens)
-                        should_emit = (len(generated_text_tokens) % 10 == 0 and len(generated_text_tokens) > 0)
+                    # Handle termination
+                    if action == 'terminate':
+                        if state.has_generated_tokens():
+                            result = _create_segment_from_tokens(
+                                state.generated_text_tokens, state.generated_taste_tokens,
+                                device, True, 'terminate'
+                            )
+                            result_queue.put(result)
+                        break
                     
-                    # Step 9: Emit segment if needed
-                    if should_emit and generated_text_tokens:
-                        # Create generated text_ids tensor
-                        gen_text_ids = torch.tensor([generated_text_tokens], device=device, dtype=torch.long)
-                        
-                        # Create generated taste_ids tensor
-                        if generated_taste_tokens:
-                            gen_taste_ids = torch.stack(generated_taste_tokens).unsqueeze(0)
-                        else:
-                            gen_taste_ids = torch.empty(1, len(generated_text_tokens), 4, device=device, dtype=torch.long)
-                        
-                        # Create TASTESegment for generated content
-                        generated_segment = TASTESegment(
-                            role='assistant',
-                            modality='audio',  # Default to audio for assistant responses
-                            text_ids=gen_text_ids,
-                            taste_ids=gen_taste_ids
-                        )
-                        
-                        # Create streaming result
-                        result = {
-                            'is_complete': completion_status.is_complete,
-                            'completion_reason': completion_status.reason,
-                            'segment': generated_segment
-                        }
-                        
-                        result_queue.put(result)
-                        
-                        # If complete, break the generation loop
-                        if completion_status.is_complete:
-                            break
-                        
-                        # Reset accumulated tokens if we emitted a partial segment
-                        if not completion_status.is_complete:
-                            # Keep accumulating for next emission
-                            pass
-                    
-                    generation_step += 1
-                
-                # Ensure we always emit a final result if generation ends
-                if not completion_status.is_complete and generated_text_tokens:
-                    # Final emission
-                    gen_text_ids = torch.tensor([generated_text_tokens], device=device, dtype=torch.long)
-                    gen_taste_ids = torch.stack(generated_taste_tokens).unsqueeze(0) if generated_taste_tokens else torch.empty(1, len(generated_text_tokens), 4, device=device, dtype=torch.long)
-                    
-                    final_segment = TASTESegment(
-                        role='assistant',
-                        modality='audio',
-                        text_ids=gen_text_ids,
-                        taste_ids=gen_taste_ids
+                    # Check if we should emit a segment
+                    should_emit = _should_emit_segment(
+                        completion_status, should_emit_segment, text_id, action,
+                        state.generated_text_tokens
                     )
                     
-                    final_result = {
-                        'is_complete': True,
-                        'completion_reason': 'max_length',
-                        'segment': final_segment
-                    }
+                    # Emit segment if needed
+                    if should_emit and state.has_generated_tokens():
+                        result = _create_segment_from_tokens(
+                            state.generated_text_tokens, state.generated_taste_tokens,
+                            device, completion_status.is_complete, completion_status.reason
+                        )
+                        result_queue.put(result)
+                        
+                        # Break if complete
+                        if completion_status.is_complete:
+                            break
                     
-                    result_queue.put(final_result)
+                    state.increment_step()
+                
+                # Final emission if needed
+                if not completion_status.is_complete and state.has_generated_tokens():
+                    result = _create_segment_from_tokens(
+                        state.generated_text_tokens, state.generated_taste_tokens,
+                        device, True, 'max_length'
+                    )
+                    result_queue.put(result)
         
         except Exception as e:
             exception_queue.put(e)
     
-    # Step 10: Start background generation thread
-    worker_thread = Thread(target=_generation_worker)
+    # Start background generation thread and consume results
+    return _run_streaming_generation_thread(_generation_worker, result_queue, exception_queue)
+
+
+def _run_streaming_generation_thread(worker_func, result_queue, exception_queue):
+    """Run worker thread and yield streaming results."""
+    worker_thread = Thread(target=worker_func)
     worker_thread.daemon = True
     worker_thread.start()
     
-    # Step 11: Yield results as they become available
-    while True:
-        try:
+    try:
+        while True:
             # Check for exceptions first
             if not exception_queue.empty():
                 raise exception_queue.get_nowait()
             
-            # Try to get result with timeout
-            result = result_queue.get(timeout=1.0)
-            yield result
-            
-            # If this result is complete, we're done
-            if result['is_complete']:
-                break
+            try:
+                # Try to get result with timeout
+                result = result_queue.get(timeout=1.0)
+                yield result
                 
-        except Empty:
-            # Check if thread is still alive
-            if not worker_thread.is_alive():
-                # Thread died without putting a result - check for exception
-                if not exception_queue.empty():
-                    raise exception_queue.get_nowait()
-                else:
-                    # Thread finished without error but no final result
+                # If this result is complete, we're done
+                if result['is_complete']:
                     break
-            # Continue waiting for results
-            continue
+                    
+            except Empty:
+                # Check if thread is still alive
+                if not worker_thread.is_alive():
+                    # Thread died without putting a result - check for exception
+                    if not exception_queue.empty():
+                        raise exception_queue.get_nowait()
+                    else:
+                        # Thread finished without error but no final result
+                        break
+                # Continue waiting for results
+                continue
+    finally:
+        # Ensure thread cleanup
+        if worker_thread.is_alive():
+            worker_thread.join(timeout=1.0)
