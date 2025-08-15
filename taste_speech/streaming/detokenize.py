@@ -13,58 +13,93 @@ if TYPE_CHECKING:
 
 def _validate_detokenize_inputs(
     speaker_embeds: torch.Tensor,
-    text_ids: torch.Tensor,
-    text_word_ids: torch.Tensor,
-    taste_ids: torch.Tensor,
-    prev_text_ids: Optional[torch.Tensor] = None,
-    prev_text_word_ids: Optional[torch.Tensor] = None,
-    prev_taste_ids: Optional[torch.Tensor] = None,
+    asr_token_ids: torch.Tensor,
+    asr_word_ids: torch.Tensor,
+    asr_taste_ids: torch.Tensor,
+    prev_asr_token_ids: Optional[torch.Tensor] = None,
+    prev_asr_word_ids: Optional[torch.Tensor] = None,
+    prev_asr_taste_ids: Optional[torch.Tensor] = None,
     prev_speech_ids: Optional[torch.Tensor] = None,
 ) -> None:
     """Validate inputs for taste_detokenize function."""
-    # Validate inputs
+    
+    # Validate required tensors
     if not isinstance(speaker_embeds, torch.Tensor):
         raise TypeError("speaker_embeds must be a torch.Tensor")
-    if not isinstance(text_ids, torch.Tensor):
-        raise TypeError("text_ids must be a torch.Tensor")
-    if not isinstance(taste_ids, torch.Tensor):
-        raise TypeError("taste_ids must be a torch.Tensor")
-    if not isinstance(text_word_ids, torch.Tensor):
-        raise TypeError("text_word_ids must be a torch.Tensor")
+    if not isinstance(asr_token_ids, torch.Tensor):
+        raise TypeError("asr_token_ids must be a torch.Tensor")
+    if not isinstance(asr_word_ids, torch.Tensor):
+        raise TypeError("asr_word_ids must be a torch.Tensor")
+    if not isinstance(asr_taste_ids, torch.Tensor):
+        raise TypeError("asr_taste_ids must be a torch.Tensor")
     
-    # Validate optional parameters
-    if prev_text_ids is not None and not isinstance(prev_text_ids, torch.Tensor):
-        raise TypeError("prev_text_ids must be a torch.Tensor or None")
-    if prev_taste_ids is not None and not isinstance(prev_taste_ids, torch.Tensor):
-        raise TypeError("prev_taste_ids must be a torch.Tensor or None")
-    if prev_speech_ids is not None and not isinstance(prev_speech_ids, torch.Tensor):
-        raise TypeError("prev_speech_ids must be a torch.Tensor or None")
-    if prev_text_word_ids is not None and not isinstance(prev_text_word_ids, torch.Tensor):
-        raise TypeError("prev_text_word_ids must be a torch.Tensor or None")
+    # Validate shapes
+    if speaker_embeds.dim() != 2 or speaker_embeds.size(0) != 1:
+        raise ValueError("speaker_embeds must have shape (1, embed_dim)")
+    if asr_token_ids.dim() != 2 or asr_token_ids.size(0) != 1:
+        raise ValueError("asr_token_ids must have shape (1, seq_len)")
+    if asr_word_ids.dim() != 2 or asr_word_ids.size(0) != 1:
+        raise ValueError("asr_word_ids must have shape (1, seq_len)")
+    if asr_taste_ids.dim() != 3 or asr_taste_ids.size(0) != 1:
+        raise ValueError("asr_taste_ids must have shape (1, seq_len, vq_dim)")
     
-    # Validate tensor shapes
-    if text_ids.dim() != 2 or text_ids.shape[0] != 1:
-        raise ValueError(f"text_ids must have shape (1, seq_len), got {text_ids.shape}")
-    if taste_ids.dim() != 3 or taste_ids.shape[0] != 1:
-        raise ValueError(f"taste_ids must have shape (1, seq_len, vq_dim), got {taste_ids.shape}")
-    if text_word_ids.dim() != 2 or text_word_ids.shape[0] != 1:
-        raise ValueError(f"text_word_ids must have shape (1, seq_len), got {text_word_ids.shape}")
-    if text_ids.shape[1] != taste_ids.shape[1]:
-        raise ValueError(f"text_ids and taste_ids must have same sequence length, got {text_ids.shape[1]} vs {taste_ids.shape[1]}")
-    if text_ids.shape[1] != text_word_ids.shape[1]:
-        raise ValueError(f"text_ids and text_word_ids must have same sequence length, got {text_ids.shape[1]} vs {text_word_ids.shape[1]}")
+    # Validate sequence length consistency
+    seq_len = asr_token_ids.size(1)
+    if asr_word_ids.size(1) != seq_len:
+        raise ValueError("asr_token_ids and asr_word_ids must have same sequence length")
+    if asr_taste_ids.size(1) != seq_len:
+        raise ValueError("asr_token_ids and asr_taste_ids must have same sequence length")
+    
+    # Validate optional previous tensors if provided
+    if prev_asr_token_ids is not None:
+        if not isinstance(prev_asr_token_ids, torch.Tensor):
+            raise TypeError("prev_asr_token_ids must be a torch.Tensor")
+        if prev_asr_token_ids.dim() != 2 or prev_asr_token_ids.size(0) != 1:
+            raise ValueError("prev_asr_token_ids must have shape (1, prev_seq_len)")
+            
+    if prev_asr_word_ids is not None:
+        if not isinstance(prev_asr_word_ids, torch.Tensor):
+            raise TypeError("prev_asr_word_ids must be a torch.Tensor")
+        if prev_asr_word_ids.dim() != 2 or prev_asr_word_ids.size(0) != 1:
+            raise ValueError("prev_asr_word_ids must have shape (1, prev_seq_len)")
+            
+    if prev_asr_taste_ids is not None:
+        if not isinstance(prev_asr_taste_ids, torch.Tensor):
+            raise TypeError("prev_asr_taste_ids must be a torch.Tensor")
+        if prev_asr_taste_ids.dim() != 3 or prev_asr_taste_ids.size(0) != 1:
+            raise ValueError("prev_asr_taste_ids must have shape (1, prev_seq_len, vq_dim)")
+            
+    if prev_speech_ids is not None:
+        if not isinstance(prev_speech_ids, torch.Tensor):
+            raise TypeError("prev_speech_ids must be a torch.Tensor")
+        if prev_speech_ids.dim() != 2 or prev_speech_ids.size(0) != 1:
+            raise ValueError("prev_speech_ids must have shape (1, prev_speech_len)")
+    
+    # Validate consistency between previous tensors
+    if prev_asr_token_ids is not None and prev_asr_word_ids is not None:
+        if prev_asr_token_ids.size(1) != prev_asr_word_ids.size(1):
+            raise ValueError("prev_asr_token_ids and prev_asr_word_ids must have same sequence length")
+            
+    if prev_asr_token_ids is not None and prev_asr_taste_ids is not None:
+        if prev_asr_token_ids.size(1) != prev_asr_taste_ids.size(1):
+            raise ValueError("prev_asr_token_ids and prev_asr_taste_ids must have same sequence length")
+    
+    # Validate VQ dimension consistency
+    if prev_asr_taste_ids is not None:
+        if prev_asr_taste_ids.size(2) != asr_taste_ids.size(2):
+            raise ValueError("prev_asr_taste_ids and asr_taste_ids must have same VQ dimension")
 
 
 def taste_detokenize(
     model: "TasteForCausalLM",
     processor: "TasteProcessor",
     speaker_embeds: torch.Tensor,
-    text_ids: torch.Tensor,
-    text_word_ids: torch.Tensor,
-    taste_ids: torch.Tensor,
-    prev_text_ids: Optional[torch.Tensor] = None,
-    prev_text_word_ids: Optional[torch.Tensor] = None,
-    prev_taste_ids: Optional[torch.Tensor] = None,
+    asr_token_ids: torch.Tensor,
+    asr_word_ids: torch.Tensor,
+    asr_taste_ids: torch.Tensor,
+    prev_asr_token_ids: Optional[torch.Tensor] = None,
+    prev_asr_word_ids: Optional[torch.Tensor] = None,
+    prev_asr_taste_ids: Optional[torch.Tensor] = None,
     prev_speech_ids: Optional[torch.Tensor] = None,
     prev_audio_ms: int = 0,
     out_sampling_rate: int = 16000,
@@ -101,65 +136,52 @@ def taste_detokenize(
     # Validate all inputs
     _validate_detokenize_inputs(
         speaker_embeds=speaker_embeds,
-        text_ids=text_ids,
-        text_word_ids=text_word_ids,
-        taste_ids=taste_ids,
-        prev_text_ids=prev_text_ids,
-        prev_text_word_ids=prev_text_word_ids,
-        prev_taste_ids=prev_taste_ids,
+        asr_token_ids=asr_token_ids,
+        asr_word_ids=asr_word_ids,
+        asr_taste_ids=asr_taste_ids,
+        prev_asr_token_ids=prev_asr_token_ids,
+        prev_asr_word_ids=prev_asr_word_ids,
+        prev_asr_taste_ids=prev_asr_taste_ids,
         prev_speech_ids=prev_speech_ids,
     )
     
     device = model.device
-    
+
     with torch.no_grad():
         # Step 1: Build complete text and TASTE token sequences
-        if prev_text_ids is not None and prev_taste_ids is not None and prev_text_ids.numel() > 0:
-            full_text_ids = torch.cat([prev_text_ids, text_ids], dim=1)
-            full_taste_ids = torch.cat([prev_taste_ids, taste_ids], dim=1)
-            
-            # Handle word_ids concatenation with proper indexing
-            if prev_text_word_ids is not None:
-                max_prev_word_id = prev_text_word_ids.max().item()
-                min_current_word_id = text_word_ids.min().item()
-                # Adjust current word IDs to continue from previous max + 1
-                adjusted_text_word_ids = text_word_ids - min_current_word_id + max_prev_word_id + 1
-                full_text_word_ids = torch.cat([prev_text_word_ids, adjusted_text_word_ids], dim=1)
-            else:
-                full_text_word_ids = text_word_ids
-        else:
-            full_text_ids = text_ids
-            full_taste_ids = taste_ids
-            full_text_word_ids = text_word_ids
-        
-        # Move to device
-        full_text_ids = full_text_ids.to(device)
-        full_taste_ids = full_taste_ids.to(device)
-        full_text_word_ids = full_text_word_ids.to(device)
-        speaker_embeds = speaker_embeds.to(device)
-        
-        # Ensure previous tensors are on correct device
-        if prev_text_ids is not None and prev_text_ids.numel() > 0:
-            prev_text_ids = prev_text_ids.to(device)
-        if prev_taste_ids is not None and prev_taste_ids.numel() > 0:
-            prev_taste_ids = prev_taste_ids.to(device)
-        if prev_text_word_ids is not None:
-            prev_text_word_ids = prev_text_word_ids.to(device)
+        if prev_asr_token_ids is not None and prev_asr_taste_ids is not None and prev_asr_token_ids.numel() > 0:
+            full_asr_token_ids = torch.cat([prev_asr_token_ids, asr_token_ids], dim=1).to(device)
+            full_asr_taste_ids = torch.cat([prev_asr_taste_ids, asr_taste_ids], dim=1).to(device)
 
-        full_token_lengths = torch.tensor([full_text_ids.shape[1]], device=device, dtype=torch.long)
+            # Adjust current word IDs to continue from previous max + 1
+            max_prev_word_id = prev_asr_word_ids.max().item()
+            min_current_word_id = asr_word_ids.min().item()
+            adjusted_text_word_ids = asr_word_ids - min_current_word_id + max_prev_word_id + 1
+            full_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_text_word_ids], dim=1)
+            
+        else:
+            full_asr_token_ids = asr_token_ids.to(device)
+            full_asr_taste_ids = asr_taste_ids.to(device)
+            full_asr_word_ids = asr_word_ids.to(device)
+
+        speaker_embeds = speaker_embeds.to(device)
+        full_asr_token_lengths = torch.tensor([full_asr_token_ids.shape[1]], device=device, dtype=torch.long)
         
         # Step 3: Get audio unit embeddings from TASTE tokens
         vq_module = model.audio_tower.vq.rvq
-        audio_unit_embeds = vq_module.get_output_from_indices(full_taste_ids).to(device)
-        audio_unit_lengths = audio_unit_embeds.size(1)
-        
+        full_audio_unit_embeds = model.get_audio_embeds_from_taste(
+            vq_module, full_asr_token_ids, full_asr_word_ids,
+            asr_taste_ids=full_asr_taste_ids
+        ).to(device)
+        full_audio_unit_lengths = full_audio_unit_embeds.size(1)
+
         # Step 4: Generate speech tokens using extended voice decoder
         speech_decoder_results = model.voice_decoder_generate(
             speaker_embeds=speaker_embeds,
-            audio_unit_embeds=audio_unit_embeds,
-            audio_unit_lengths=audio_unit_lengths,
-            asr_token_ids=full_taste_ids,
-            asr_token_lengths=full_token_lengths,
+            audio_unit_embeds=full_audio_unit_embeds,
+            audio_unit_lengths=full_audio_unit_lengths,
+            asr_token_ids=full_asr_token_ids,
+            asr_token_lengths=full_asr_token_lengths,
             prev_speech_ids=prev_speech_ids,
         )
 

@@ -135,9 +135,9 @@ def main():
                 model=model,
                 processor=processor,
                 speaker_embeds=speaker_embeds,
-                text_ids=asr_token_ids,
-                taste_ids=taste_tokens,
-                text_word_ids=asr_word_ids,
+                asr_token_ids=asr_token_ids,
+                asr_taste_ids=taste_tokens,
+                asr_word_ids=asr_word_ids,
                 out_sampling_rate=sampling_rate
             )
             
@@ -165,10 +165,10 @@ def main():
             print(f"  - Chunk size: {chunk_size}")
             
             # Initialize previous context (empty at start)
-            prev_text_ids = torch.empty(1, 0, dtype=torch.long, device=device)
-            prev_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)  
+            prev_asr_token_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+            prev_asr_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)  
             prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
-            prev_text_word_ids = None
+            prev_asr_word_ids = None
             prev_audio_ms = 0
             
             # Storage for merged outputs
@@ -185,23 +185,23 @@ def main():
                 print(f"  Processing chunk {chunk_num}/{total_chunks} (tokens {chunk_start}:{chunk_end})")
                 
                 # Extract current chunk
-                current_text_ids = asr_token_ids[:, chunk_start:chunk_end]
-                current_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
-                current_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
+                current_asr_token_ids = asr_token_ids[:, chunk_start:chunk_end]
+                current_asr_taste_ids = taste_tokens[:, chunk_start:chunk_end, :]
+                current_asr_word_ids = asr_word_ids[:, chunk_start:chunk_end] 
                 
                 # Call taste_detokenize with previous context
                 result = taste_detokenize(
                     model=model,
                     processor=processor,
                     speaker_embeds=speaker_embeds,
-                    prev_text_ids=prev_text_ids,
-                    prev_taste_ids=prev_taste_ids,
+                    prev_asr_token_ids=prev_asr_token_ids,
+                    prev_asr_taste_ids=prev_asr_taste_ids,
                     prev_speech_ids=prev_speech_ids,
                     prev_audio_ms=prev_audio_ms,
-                    text_ids=current_text_ids,
-                    taste_ids=current_taste_ids,
-                    text_word_ids=current_word_ids,
-                    prev_text_word_ids=prev_text_word_ids,
+                    asr_token_ids=current_asr_token_ids,
+                    asr_taste_ids=current_asr_taste_ids,
+                    asr_word_ids=current_asr_word_ids,
+                    prev_asr_word_ids=prev_asr_word_ids,
                     out_sampling_rate=sampling_rate
                 )
                 
@@ -215,12 +215,12 @@ def main():
                 print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
                 
                 # Update previous context for next iteration
-                prev_text_ids = torch.cat([prev_text_ids, current_text_ids], dim=1)
-                prev_taste_ids = torch.cat([prev_taste_ids, current_taste_ids], dim=1)
-                if prev_text_word_ids is None:
-                    prev_text_word_ids = current_word_ids
+                prev_asr_token_ids = torch.cat([prev_asr_token_ids, current_asr_token_ids], dim=1)
+                prev_asr_taste_ids = torch.cat([prev_asr_taste_ids, current_asr_taste_ids], dim=1)
+                if prev_asr_word_ids is None:
+                    prev_asr_word_ids = current_asr_word_ids
                 else:
-                    prev_text_word_ids = torch.cat([prev_text_word_ids, current_word_ids], dim=1)
+                    prev_asr_word_ids = torch.cat([prev_asr_word_ids, current_asr_word_ids], dim=1)
                 if 'speech_ids' in result:
                     if prev_speech_ids.shape[1] == 0:
                         prev_speech_ids = result['speech_ids']
@@ -228,8 +228,8 @@ def main():
                         prev_speech_ids = torch.cat([prev_speech_ids, result['speech_ids']], dim=1)
                 prev_audio_ms += chunk_duration_ms
                 
-                print(f"    - Updated prev_text_ids shape: {prev_text_ids.shape}")
-                print(f"    - Updated prev_taste_ids shape: {prev_taste_ids.shape}")
+                print(f"    - Updated prev_asr_token_ids shape: {prev_asr_token_ids.shape}")
+                print(f"    - Updated prev_asr_taste_ids shape: {prev_asr_taste_ids.shape}")
                 print(f"    - Cumulative audio_ms: {prev_audio_ms}")
 
                 print(f"  Save...")
@@ -279,7 +279,7 @@ def main():
         print(f"Successfully tested non-chunked processing!")
         print(f"All tokens were processed at once without chunking.")
     else:
-        print(f"Successfully tested chunked streaming with prev_text_ids and prev_taste_ids!")
+        print(f"Successfully tested chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
         print(f"The chunked approach simulates real streaming conditions where")
         print(f"previous context is maintained across multiple detokenization calls.")
     print(f"You can now listen to the original audio ({audio_path}) and")
