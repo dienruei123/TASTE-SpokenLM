@@ -72,7 +72,7 @@ def taste_detokenize(
             # Handle word_ids concatenation with proper indexing
             if prev_text_word_ids is not None:
                 max_prev_word_id = prev_text_word_ids.max().item()
-                adjusted_text_word_ids = text_word_ids + max_prev_word_id + 1
+                adjusted_text_word_ids = text_word_ids - text_word_ids.max().item() + max_prev_word_id + 1
                 full_text_word_ids = torch.cat([prev_text_word_ids, adjusted_text_word_ids], dim=1)
             else:
                 full_text_word_ids = text_word_ids
