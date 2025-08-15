@@ -66,6 +66,14 @@ def taste_detokenize(
     
     with torch.no_grad():
         # Step 1: Build complete text and TASTE token sequences
+        print(f"[DEBUG] prev_text_ids shape: {prev_text_ids.shape}, text_ids shape: {text_ids.shape}")
+        print(f"[DEBUG] prev_taste_ids shape: {prev_taste_ids.shape}, taste_ids shape: {taste_ids.shape}")
+        print(f"[DEBUG] text_word_ids shape: {text_word_ids.shape}")
+        if prev_text_word_ids is not None:
+            print(f"[DEBUG] prev_text_word_ids shape: {prev_text_word_ids.shape}")
+            print(f"[DEBUG] prev_text_word_ids values: {prev_text_word_ids}")
+        print(f"[DEBUG] text_word_ids values: {text_word_ids}")
+        
         if prev_text_ids.numel() > 0:
             full_text_ids = torch.cat([prev_text_ids, text_ids], dim=1)
             full_taste_ids = torch.cat([prev_taste_ids, taste_ids], dim=1)
@@ -74,8 +82,10 @@ def taste_detokenize(
             if prev_text_word_ids is not None:
                 max_prev_word_id = prev_text_word_ids.max().item()
                 min_current_word_id = text_word_ids.min().item()
+                print(f"[DEBUG] max_prev_word_id: {max_prev_word_id}, min_current_word_id: {min_current_word_id}")
                 # Adjust current word IDs to continue from previous max + 1
                 adjusted_text_word_ids = text_word_ids - min_current_word_id + max_prev_word_id + 1
+                print(f"[DEBUG] adjusted_text_word_ids: {adjusted_text_word_ids}")
                 full_text_word_ids = torch.cat([prev_text_word_ids, adjusted_text_word_ids], dim=1)
             else:
                 full_text_word_ids = text_word_ids
@@ -83,6 +93,12 @@ def taste_detokenize(
             full_text_ids = text_ids
             full_taste_ids = taste_ids
             full_text_word_ids = text_word_ids
+            
+        print(f"[DEBUG] full_text_ids shape: {full_text_ids.shape}")
+        print(f"[DEBUG] full_taste_ids shape: {full_taste_ids.shape}")  
+        print(f"[DEBUG] full_text_word_ids shape: {full_text_word_ids.shape}")
+        print(f"[DEBUG] full_text_word_ids values: {full_text_word_ids}")
+        print(f"[DEBUG] full_text_word_ids max: {full_text_word_ids.max().item()}")
         
         # Move to device
         full_text_ids = full_text_ids.to(device)
@@ -96,13 +112,32 @@ def taste_detokenize(
         asr_word_ids = full_text_word_ids
         
         # Step 3: Get audio unit embeddings from TASTE tokens
+        print(f"[DEBUG] About to call get_audio_embeds_from_taste")
+        print(f"[DEBUG] asr_token_ids (full_text_ids) shape: {asr_token_ids.shape}")
+        print(f"[DEBUG] asr_token_lengths: {asr_token_lengths}")
+        print(f"[DEBUG] asr_word_ids (full_text_word_ids) shape: {asr_word_ids.shape}")
+        print(f"[DEBUG] asr_word_ids values: {asr_word_ids}")
+        print(f"[DEBUG] full_taste_ids shape: {full_taste_ids.shape}")
+        print(f"[DEBUG] full_taste_ids first few values: {full_taste_ids[0, :5, :]}")
+        
         vq_module = model.audio_tower.vq.rvq
-        audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
-            vq_module=vq_module,
-            taste_preds=full_taste_ids,
-            asr_token_lengths=asr_token_lengths,
-            asr_word_ids=asr_word_ids
-        )
+        try:
+            audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
+                vq_module=vq_module,
+                taste_preds=full_taste_ids,
+                asr_token_lengths=asr_token_lengths,
+                asr_word_ids=asr_word_ids
+            )
+        except Exception as e:
+            print(f"[DEBUG] Exception in get_audio_embeds_from_taste: {e}")
+            print(f"[DEBUG] Expected: single_reduced_taste_preds.size(0) == int(single_asr_word_ids[-1]) + 1")
+            print(f"[DEBUG] Actual: full_taste_ids non-ignored size vs asr_word_ids max + 1")
+            # Let's check what the actual sizes are
+            seq_mask = full_taste_ids[0, :, 0] != -100  # IGNORE_ID is typically -100
+            single_reduced_taste_preds = full_taste_ids[0, seq_mask, :].long()
+            print(f"[DEBUG] single_reduced_taste_preds.size(0): {single_reduced_taste_preds.size(0)}")
+            print(f"[DEBUG] int(asr_word_ids[0, -1]) + 1: {int(asr_word_ids[0, -1]) + 1}")
+            raise e
         
         # Step 4: Generate speech tokens using extended voice decoder
         speech_decoder_results = _voice_decoder_generate_extended(
