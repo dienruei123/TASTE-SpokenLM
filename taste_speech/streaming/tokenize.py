@@ -93,7 +93,7 @@ def taste_tokenize(
             asr_token_lengths=asr_token_lengths,
             audio_features=audio_features,
             audio_feature_lengths=audio_feature_lengths,
-            word_ids=word_ids,
+            asr_word_ids=word_ids,
         )
         
         # Step 4: Extract quantized indices (TASTE tokens)
