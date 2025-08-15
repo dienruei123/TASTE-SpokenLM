@@ -1005,24 +1005,79 @@ class TasteSpokenLM(nn.Module):
             output_lengths=output_lengths,
         )
 
-    def get_audio_embeds_from_taste(self, vq_module, asr_token_lengths, asr_word_ids, taste_preds=None, taste_logits=None, taste_labels=None):
-        device = taste_logits.device if taste_preds is None else taste_preds.device
-        if taste_preds is None:
-            taste_preds = torch.where(
-                taste_labels != IGNORE_ID, 
-                taste_logits.argmax(dim=-1), 
-                IGNORE_ID)
+    def get_audio_embeds_from_taste(
+            self, vq_module, asr_token_lengths, asr_word_ids, 
+            llm_taste_preds=None, llm_taste_logits=None, llm_taste_labels=None,
+            asr_taste_indices=None):
+        """
+        Convert TASTE predictions to audio embeddings for speech synthesis.
+        
+        This method supports two main workflows:
+        1. Direct input: Provide pre-computed asr_taste_indices
+        2. LLM output: Provide LLM predictions/logits/labels to compute indices
+        
+        Args:
+            vq_module: Vector quantization module for converting indices to embeddings
+            asr_token_lengths (torch.Tensor): Length of each ASR sequence [batch_size]
+            asr_word_ids (torch.Tensor): Word-level alignment indices [batch_size, seq_len]
+            
+            # LLM TASTE outputs (choose one combination):
+            llm_taste_preds (torch.Tensor, optional): Pre-computed LLM predictions 
+                [batch_size, llm_seq_len, num_taste_tokens]
+            llm_taste_logits (torch.Tensor, optional): Raw LLM logits for TASTE tokens
+                [batch_size, llm_seq_len, vocab_size] 
+            llm_taste_labels (torch.Tensor, optional): Ground truth TASTE labels
+                [batch_size, llm_seq_len, num_taste_tokens]
+                
+            # Direct input (bypasses LLM processing):
+            asr_taste_indices (torch.Tensor, optional): Pre-computed ASR-aligned indices
+                [batch_size, asr_seq_len, num_taste_tokens]
+        
+        Parameter Combinations:
+            Option 1: asr_taste_indices (direct, most efficient)
+            Option 2: llm_taste_preds + asr_word_ids mapping
+            Option 3: llm_taste_logits + llm_taste_labels (training mode)
+            
+        Returns:
+            tuple: (audio_unit_embeds, audio_unit_lengths)
+                - audio_unit_embeds (torch.Tensor): Audio embeddings [batch_size, asr_seq_len, embed_dim]
+                - audio_unit_lengths (torch.Tensor): Actual lengths [batch_size]
+                
+        Raises:
+            AssertionError: If word alignment dimensions don't match
+            AttributeError: If all input parameters are None
+            
+        Note:
+            At least one of {asr_taste_indices, llm_taste_preds, (llm_taste_logits + llm_taste_labels)} 
+            must be provided.
+        """
 
-        unpad_asr_word_ids = unpad_sequence(asr_word_ids, asr_token_lengths.cpu(), batch_first=True)
-        sequences = []
-        for i, single_asr_word_ids in enumerate(unpad_asr_word_ids):
-            seq_mask = taste_preds[i, :, 0] != IGNORE_ID
-            single_reduced_taste_preds = taste_preds[i, seq_mask, :].long()
-            assert single_reduced_taste_preds.size(0) == int(single_asr_word_ids[-1]) + 1
-            single_asr_taste_indices = torch.index_select(single_reduced_taste_preds, 0, single_asr_word_ids.long())
-            # assert single_audio_embeds.size(0) == int(asr_token_lengths[i])
-            sequences.append(single_asr_taste_indices)
-        asr_taste_indices = pad_sequence(sequences, batch_first=True, padding_value=0)
+        if asr_taste_indices is not None:
+            device = asr_taste_indices.device
+        else:
+            device = llm_taste_logits.device if llm_taste_preds is None else llm_taste_preds.device
+
+        if asr_taste_indices is None:
+            if llm_taste_preds is None:
+                # use `llm_taste_labels`` and `llm_taste_logits`` to get `llm_taste_preds`
+                llm_taste_preds = torch.where(
+                    llm_taste_labels != IGNORE_ID, 
+                    llm_taste_logits.argmax(dim=-1), 
+                    IGNORE_ID)
+
+            def _map_to_asr_taste_indices(asr_word_ids, asr_token_lengths, llm_taste_preds):
+                unpad_asr_word_ids = unpad_sequence(asr_word_ids, asr_token_lengths.cpu(), batch_first=True)
+                sequences = []
+                for i, single_asr_word_ids in enumerate(unpad_asr_word_ids):
+                    seq_mask = llm_taste_preds[i, :, 0] != IGNORE_ID
+                    single_reduced_llm_taste_preds = llm_taste_preds[i, seq_mask, :].long()
+                    assert single_reduced_llm_taste_preds.size(0) == int(single_asr_word_ids[-1]) + 1
+                    single_asr_taste_indices = torch.index_select(single_reduced_llm_taste_preds, 0, single_asr_word_ids.long())
+                    # assert single_audio_embeds.size(0) == int(asr_token_lengths[i])
+                    sequences.append(single_asr_taste_indices)
+                asr_taste_indices = pad_sequence(sequences, batch_first=True, padding_value=0)
+                return asr_taste_indices
+            asr_taste_indices = _map_to_asr_taste_indices(asr_word_ids, asr_token_lengths, llm_taste_preds)
         
         asr_seq_mask = generate_mask_from_length(asr_token_lengths)
         audio_unit_embeds = (vq_module.get_output_from_indices(asr_taste_indices) * asr_seq_mask.unsqueeze(-1)).to(device)
@@ -1511,7 +1566,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
             if do_measure_speech:
                 audio_unit_embeds, audio_unit_lengths = self.spoken_lm.get_audio_embeds_from_taste(
                     vq_module=vq_module,
-                    taste_logits=outputs['taste_logits'], taste_labels=outputs['taste_labels'],
+                    llm_taste_logits=outputs['taste_logits'], llm_taste_labels=outputs['taste_labels'],
                     asr_token_lengths=asr_token_lengths, asr_word_ids=asr_word_ids)
                 decoded = self.speech_decoder(
                     speaker_embeds=speaker_embeds,
@@ -1807,7 +1862,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
 
         audio_unit_embeds, audio_unit_lengths = self.spoken_lm.get_audio_embeds_from_taste(
             vq_module=vq_module,
-            taste_preds=llm_indices,
+            llm_taste_preds=llm_indices,
             asr_token_lengths=asr_token_lengths,
             asr_word_ids=asr_word_ids
         )
@@ -1875,7 +1930,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
 
             audio_unit_embeds, audio_unit_lengths = self.spoken_lm.get_audio_embeds_from_taste(
                 vq_module=vq_module,
-                taste_logits=lm_outputs['taste_logits'], taste_labels=lm_outputs['taste_labels'],
+                llm_taste_logits=lm_outputs['taste_logits'], llm_taste_labels=lm_outputs['taste_labels'],
                 asr_token_lengths=asr_token_lengths, asr_word_ids=asr_word_ids)
 
         results = self.voice_decoder_generate(
