@@ -118,7 +118,7 @@ def main():
     print("\n4. Converting TASTE tokens back to audio with chunking...")
     try:
         # Configuration for chunking
-        chunk_size = max(1, asr_token_ids.shape[1] // 3)  # Split into ~4 chunks
+        chunk_size = max(1, asr_token_ids.shape[1] // 1)  # Split into ~1 chunks
         print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
         print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
         print(f"  - Chunk size: {chunk_size}")
