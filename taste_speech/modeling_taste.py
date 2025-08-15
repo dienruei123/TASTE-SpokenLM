@@ -1018,7 +1018,6 @@ class TasteSpokenLM(nn.Module):
         for i, single_asr_word_ids in enumerate(unpad_asr_word_ids):
             seq_mask = taste_preds[i, :, 0] != IGNORE_ID
             single_reduced_taste_preds = taste_preds[i, seq_mask, :].long()
-            print(single_reduced_taste_preds, single_asr_word_ids)
             assert single_reduced_taste_preds.size(0) == int(single_asr_word_ids[-1]) + 1
             single_asr_taste_indices = torch.index_select(single_reduced_taste_preds, 0, single_asr_word_ids.long())
             # assert single_audio_embeds.size(0) == int(asr_token_lengths[i])

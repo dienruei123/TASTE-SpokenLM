@@ -150,12 +150,8 @@ def taste_detokenize(
         
         # Step 3: Get audio unit embeddings from TASTE tokens
         vq_module = model.audio_tower.vq.rvq
-        audio_unit_embeds, audio_unit_lengths = model.spoken_lm.get_audio_embeds_from_taste(
-            vq_module=vq_module,
-            taste_preds=full_taste_ids,
-            asr_token_lengths=full_token_lengths,
-            asr_word_ids=full_text_word_ids
-        )
+        audio_unit_embeds = vq_module.get_output_from_indices(full_taste_ids).to(device)
+        audio_unit_lengths = audio_unit_embeds.size(1)
         
         # Step 4: Generate speech tokens using extended voice decoder
         speech_decoder_results = model.voice_decoder_generate(
