@@ -262,8 +262,18 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
             temp_arrow_dir = arrow_path_obj / "temp_test"
             if temp_arrow_dir.exists():
                 import shutil
-                shutil.rmtree(temp_arrow_dir)
-                print("✓ Cleaned up temporary files")
+                try:
+                    shutil.rmtree(temp_arrow_dir, ignore_errors=True)
+                    print("✓ Cleaned up temporary files")
+                except OSError as e:
+                    print(f"⚠ Warning: Could not fully clean temp directory: {e}")
+                    # Force removal if normal rmtree fails
+                    import subprocess
+                    try:
+                        subprocess.run(['rm', '-rf', str(temp_arrow_dir)], check=True)
+                        print("✓ Force cleaned temporary files with rm -rf")
+                    except subprocess.CalledProcessError:
+                        print(f"⚠ Warning: temp directory may still exist: {temp_arrow_dir}")
         
         return True
         
