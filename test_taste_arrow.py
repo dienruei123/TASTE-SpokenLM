@@ -134,12 +134,61 @@ def test_single_sample_processing(dataset, whisper_processor_path, llm_tokenizer
         return False
 
 
+def load_from_arrows_no_cache(arrow_fpath_list, whisper_processor_fpath="", llm_tokenizer_fpath="", streaming=False, num_proc=1):
+    """Custom load_from_arrows that disables caching."""
+    from taste_speech.data.dataset import process_one_sample, REQUIRED_COLUMNS
+    from datasets import Dataset, concatenate_datasets
+    from transformers import AutoTokenizer, WhisperProcessor
+    from taste_speech.modules_taste.cosyvoice.whisper_frontend import WhisperFrontend
+    from functools import partial
+    import tqdm
+    
+    # Concatenate datasets
+    ds_of_arrows = concatenate_datasets([
+        Dataset.from_file(_arrow_fpath) for _arrow_fpath in tqdm.tqdm(arrow_fpath_list, desc="concatenating...")
+    ])
+    
+    if streaming:
+        ds_of_arrows = ds_of_arrows.to_iterable_dataset()
+    
+    # Load processors
+    resampler_dict = {}
+    whisper_processor = WhisperProcessor.from_pretrained(whisper_processor_fpath)
+    llm_tokenizer = AutoTokenizer.from_pretrained(llm_tokenizer_fpath)
+    whisper_feature_extractor = WhisperFrontend(
+        whisper_model="large-v3",
+        do_pad_trim=True,
+        permute=True,
+    )
+    
+    # Create processing function
+    _process_one_sample = partial(
+        process_one_sample, 
+        resampler_dict=resampler_dict, 
+        whisper_processor=whisper_processor,
+        llm_tokenizer=llm_tokenizer, 
+        whisper_feature_extractor=whisper_feature_extractor
+    )
+    
+    # Map with caching disabled
+    kwargs = {"load_from_cache_file": False}
+    if not streaming:
+        kwargs['num_proc'] = num_proc
+    
+    ds_processed_arrows = ds_of_arrows.map(
+        _process_one_sample,
+        **kwargs,
+    ).select_columns(REQUIRED_COLUMNS)
+    
+    return ds_processed_arrows
+
+
 def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, test_samples=None, num_proc=1):
     """Test full pipeline using load_from_arrows."""
     print(f"\nTesting full pipeline with {num_proc} processes...")
     
     try:
-        from taste_speech.data.dataset import load_from_arrows, REQUIRED_COLUMNS
+        from taste_speech.data.dataset import REQUIRED_COLUMNS
         
         # Prepare arrow files list
         arrow_path_obj = Path(arrow_path)
@@ -147,45 +196,49 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
         if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
             arrow_files = [arrow_path]
         elif arrow_path_obj.is_dir():
-            # For dataset directory, either find existing .arrow files or create temp file
-            existing_arrow_files = list(arrow_path_obj.glob("*.arrow"))
+            # Load full dataset first
+            from datasets import Dataset
+            dataset = Dataset.load_from_disk(arrow_path)
+            print(f"✓ Loaded dataset with {len(dataset)} samples")
             
-            if existing_arrow_files:
-                # Use existing .arrow files in the directory
-                arrow_files = [str(f) for f in existing_arrow_files]
-                print(f"✓ Found {len(arrow_files)} existing .arrow files")
+            # Apply sampling if requested
+            if test_samples and len(dataset) > test_samples:
+                import random
+                random.seed(42)
+                indices = random.sample(range(len(dataset)), test_samples)
+                dataset = dataset.select(indices)
+                print(f"✓ Sampled to {len(dataset)} samples for testing")
+            
+            # Create temporary arrow file with sampled data
+            temp_arrow_dir = arrow_path_obj / "temp_test"
+            dataset.save_to_disk(str(temp_arrow_dir))
+            
+            # Find the actual .arrow file in the saved directory
+            saved_arrow_files = list(temp_arrow_dir.glob("*.arrow"))
+            if saved_arrow_files:
+                arrow_files = [str(f) for f in saved_arrow_files]
+                print(f"✓ Created temporary dataset with {len(dataset)} samples")
             else:
-                # Load dataset and create temporary arrow file if needed
-                from datasets import Dataset
-                dataset = Dataset.load_from_disk(arrow_path)
-                
-                if test_samples and len(dataset) > test_samples:
-                    import random
-                    random.seed(42)
-                    indices = random.sample(range(len(dataset)), test_samples)
-                    dataset = dataset.select(indices)
-                
-                temp_arrow_dir = arrow_path_obj / "temp_test"
-                # Use save_to_disk() to create dataset directory, then find the .arrow file
-                dataset.save_to_disk(str(temp_arrow_dir))
-                # Find the actual .arrow file in the saved directory
-                saved_arrow_files = list(temp_arrow_dir.glob("*.arrow"))
-                if saved_arrow_files:
-                    arrow_files = [str(f) for f in saved_arrow_files]
-                    print(f"✓ Created temporary dataset with {len(dataset)} samples")
-                else:
-                    raise ValueError("Failed to create temporary arrow file")
+                raise ValueError("Failed to create temporary arrow file")
         else:
             raise ValueError(f"Invalid arrow path: {arrow_path}")
         
         # Process with load_from_arrows
         print("Processing with load_from_arrows...")
-        processed_dataset = load_from_arrows(
+        
+        # Force num_proc=1 to avoid multiprocessing issues with pre-loaded processors
+        # The issue is that whisper_processor, llm_tokenizer, and whisper_feature_extractor
+        # cannot be properly pickled and shared between processes
+        safe_num_proc = 1 if num_proc > 1 else num_proc
+        if num_proc > 1:
+            print(f"⚠ Forcing num_proc=1 (was {num_proc}) to avoid multiprocessing issues")
+        
+        processed_dataset = load_from_arrows_no_cache(
             arrow_fpath_list=arrow_files,
             whisper_processor_fpath=whisper_processor_path,
             llm_tokenizer_fpath=llm_tokenizer_path,
             streaming=False,
-            num_proc=num_proc
+            num_proc=safe_num_proc
         )
         
         print(f"✓ Pipeline completed: {len(processed_dataset)} samples processed")
