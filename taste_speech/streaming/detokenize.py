@@ -115,12 +115,12 @@ def taste_detokenize(
         model: TasteForCausalLM model with speech decoding capabilities
         processor: TasteProcessor containing VoiceGenerator
         speaker_embeds: Speaker embedding tensor of shape (1, embed_dim)
-        text_ids: Current text token sequence of shape (1, seq_len)
-        text_word_ids: Word IDs for current text of shape (1, seq_len)
-        taste_ids: Current TASTE tokens of shape (1, seq_len, vq_dim)
-        prev_text_ids: Previous text token sequence of shape (1, prev_seq_len) (optional)
-        prev_text_word_ids: Word IDs for previous text (optional)
-        prev_taste_ids: Previous TASTE tokens of shape (1, prev_seq_len, vq_dim) (optional)
+        asr_token_ids: Current ASR token sequence of shape (1, seq_len)
+        asr_word_ids: Word IDs for current ASR text of shape (1, seq_len)
+        asr_taste_ids: Current TASTE tokens of shape (1, seq_len, vq_dim)
+        prev_asr_token_ids: Previous ASR token sequence of shape (1, prev_seq_len) (optional)
+        prev_asr_word_ids: Word IDs for previous ASR text (optional)
+        prev_asr_taste_ids: Previous TASTE tokens of shape (1, prev_seq_len, vq_dim) (optional)
         prev_speech_ids: Previous speech token IDs of shape (1, prev_speech_len) (optional)
         prev_audio_ms: Duration of previous audio in milliseconds (default: 0)
         out_sampling_rate: Target output sampling rate (default: 16000Hz)
@@ -154,10 +154,13 @@ def taste_detokenize(
             full_asr_taste_ids = torch.cat([prev_asr_taste_ids, asr_taste_ids], dim=1).to(device)
 
             # Adjust current word IDs to continue from previous max + 1
-            max_prev_word_id = prev_asr_word_ids.max().item()
-            min_current_word_id = asr_word_ids.min().item()
-            adjusted_text_word_ids = asr_word_ids - min_current_word_id + max_prev_word_id + 1
-            full_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_text_word_ids], dim=1)
+            if prev_asr_word_ids is not None and prev_asr_word_ids.numel() > 0:
+                max_prev_word_id = prev_asr_word_ids.max().item()
+                min_current_word_id = asr_word_ids.min().item()
+                adjusted_asr_word_ids = asr_word_ids - min_current_word_id + max_prev_word_id + 1
+                full_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_asr_word_ids], dim=1)
+            else:
+                raise Exception
             
         else:
             full_asr_token_ids = asr_token_ids.to(device)
@@ -169,7 +172,7 @@ def taste_detokenize(
         
         # Step 3: Get audio unit embeddings from TASTE tokens
         vq_module = model.audio_tower.vq.rvq
-        full_audio_unit_embeds = model.get_audio_embeds_from_taste(
+        full_audio_unit_embeds = model.spoken_lm.get_audio_embeds_from_taste(
             vq_module, full_asr_token_ids, full_asr_word_ids,
             asr_taste_ids=full_asr_taste_ids
         ).to(device)
