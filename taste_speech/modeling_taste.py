@@ -74,6 +74,8 @@ class TasteAudioTower(nn.Module):
             else:
                 self.quantization_on = False
         else:
+            if kwargs_for_joint_encoder_segmenter is None:
+                kwargs_for_joint_encoder_segmenter = {}
             self.audio_joint_encoder_segmenter = WhisperAudioJointEncoderSegmenter(
                 **kwargs_for_joint_encoder_segmenter,
             )
@@ -393,9 +395,9 @@ class TasteSpeechDecoder(nn.Module):
     def pad_unpad_sequence(
             self,
             sos_eos_emb,
-            speaker_embeds, 
+            speaker_embeds,
             audio_text_token_encoded,
-            audio_text_token_len, 
+            audio_text_token_len,
             task_id_emb,
             speech_token_embeds=None,
             speech_token_lengths=None,
