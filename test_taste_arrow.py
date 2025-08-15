@@ -158,7 +158,13 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
                 dataset = dataset.select(indices)
             
             temp_arrow = arrow_path_obj / "temp_test.arrow"
-            dataset.save_to_disk(str(temp_arrow))
+            # Use to_arrow() to create a single .arrow file, not save_to_disk() which creates a directory
+            import pyarrow as pa
+            table = dataset.data.table
+            with pa.OSFile(str(temp_arrow), 'wb') as sink:
+                with pa.RecordBatchFileWriter(sink, table.schema) as writer:
+                    writer.write_table(table)
+            
             arrow_files = [str(temp_arrow)]
             print(f"✓ Created temporary arrow file with {len(dataset)} samples")
         else:
@@ -194,8 +200,7 @@ def test_full_pipeline(arrow_path, whisper_processor_path, llm_tokenizer_path, t
         if arrow_path_obj.is_dir():
             temp_arrow = arrow_path_obj / "temp_test.arrow"
             if temp_arrow.exists():
-                import shutil
-                shutil.rmtree(temp_arrow)
+                temp_arrow.unlink()  # Remove file, not directory
                 print("✓ Cleaned up temporary files")
         
         return True
