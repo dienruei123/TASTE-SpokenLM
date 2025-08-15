@@ -236,7 +236,7 @@ def _voice_decoder_generate_extended(
     # Generation loop
     for i in range(max_len):
         y_pred, att_cache, cnn_cache = model.speech_decoder.llm.forward_chunk(
-            speech_lm_input, offset=0, required_cache_size=-1, 
+            speech_lm_input, offset=offset, required_cache_size=-1, 
             att_cache=att_cache, cnn_cache=cnn_cache,
             att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
         )
