@@ -1585,22 +1585,31 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         )
 
         # prepare lm_input
-        components = [
-            sos_eos_emb,
-            speaker_embeds, 
-            audio_text_token_encoded,
-            audio_text_token_len, 
-            task_id_emb
-        ]
         if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
             # Convert previous speech IDs to embeddings
             prev_speech_embeds = self.speech_decoder.speech_embedding(prev_speech_ids)
-            components.append(prev_speech_embeds)
-        
-        speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
-            *components,
-            padding_side='right'
-        )
+            # Calculate speech token lengths for previous speech IDs
+            prev_speech_lengths = torch.tensor([prev_speech_ids.shape[1]], 
+                                             device=prev_speech_ids.device, dtype=torch.long)
+            speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+                sos_eos_emb,
+                speaker_embeds, 
+                audio_text_token_encoded,
+                audio_text_token_len, 
+                task_id_emb,
+                speech_token_embeds=prev_speech_embeds,
+                speech_token_lengths=prev_speech_lengths,
+                padding_side='right'
+            )
+        else:
+            speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+                sos_eos_emb,
+                speaker_embeds, 
+                audio_text_token_encoded,
+                audio_text_token_len, 
+                task_id_emb,
+                padding_side='right'
+            )
 
         beam_size = 1
         sampling = 25
