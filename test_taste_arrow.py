@@ -11,9 +11,13 @@ import argparse
 from pathlib import Path
 
 
-def test_arrow_basic(arrow_path):
+def test_arrow_basic(arrow_path, max_samples=None):
     """Test basic arrow dataset structure without heavy dependencies."""
     print(f"Testing arrow dataset: {arrow_path}")
+    
+    # Apply sampling if max_samples is specified
+    if max_samples is not None:
+        print(f"Note: Will sample max {max_samples} samples for testing")
     
     try:
         # Try to import datasets with error handling
@@ -47,10 +51,19 @@ def test_arrow_basic(arrow_path):
         else:
             raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
         
-        # Load the dataset
+        # Apply sampling if requested
+        original_length = len(dataset)
+        if max_samples is not None and len(dataset) > max_samples:
+            import random
+            print(f"Sampling {max_samples} samples from {original_length} total samples for testing")
+            # Use random seed for reproducible sampling
+            random.seed(42)
+            indices = random.sample(range(len(dataset)), max_samples)
+            dataset = dataset.select(indices)
+            print(f"Selected {len(dataset)} samples for testing")
         
         print(f"✓ Dataset loaded successfully")
-        print(f"✓ Dataset length: {len(dataset)}")
+        print(f"✓ Dataset length: {len(dataset)} (original: {original_length})")
         print(f"✓ Dataset columns: {dataset.column_names}")
         
         if len(dataset) > 0:
@@ -282,10 +295,12 @@ def test_single_sample_processing_fast(dataset, whisper_processor_path, llm_toke
         return False
 
 
-def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None):
+def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None, test_samples=None):
     """Test full dataset processing with TASTE pipeline - STANDARD VERSION."""
     print(f"\n" + "=" * 50)
     print("TESTING FULL DATASET PROCESSING")
+    if test_samples:
+        print(f"(Limited to {test_samples} samples for faster testing)")
     print("=" * 50)
     
     try:
@@ -293,7 +308,7 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
         from pathlib import Path
         import os
         
-        # Determine arrow files to process
+        # Determine arrow files to process and apply sampling if needed
         arrow_path_obj = Path(arrow_path)
         
         if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
@@ -305,14 +320,24 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
                 try:
                     from datasets import Dataset
                     dataset = Dataset.load_from_disk(arrow_path)
+                    
+                    # Apply sampling before creating temp file
+                    if test_samples is not None and len(dataset) > test_samples:
+                        import random
+                        print(f"Sampling {test_samples} samples from {len(dataset)} for faster testing")
+                        random.seed(42)
+                        indices = random.sample(range(len(dataset)), test_samples)
+                        dataset = dataset.select(indices)
+                    
                     temp_arrow = arrow_path_obj / "temp_test.arrow" 
                     dataset.save_to_disk(str(temp_arrow))
                     arrow_files = [str(temp_arrow)]
-                    print(f"✓ Converted dataset directory to temporary file")
+                    print(f"✓ Converted dataset directory to temporary file (samples: {len(dataset)})")
                 except:
                     raise ValueError(f"No .arrow files found in directory: {arrow_path}")
             else:
                 print(f"✓ Found {len(arrow_files)} .arrow files")
+                # For multiple arrow files, we'll sample after loading
         else:
             raise ValueError(f"Path must be either a .arrow file or a directory: {arrow_path}")
         
@@ -329,6 +354,14 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
             streaming=False,
             num_proc=max_workers
         )
+        
+        # Apply sampling after loading if we have multiple arrow files
+        if test_samples is not None and len(processed_dataset) > test_samples and len(arrow_files) > 1:
+            import random
+            print(f"Sampling {test_samples} samples from {len(processed_dataset)} for faster testing")
+            random.seed(42)
+            indices = random.sample(range(len(processed_dataset)), test_samples)
+            processed_dataset = processed_dataset.select(indices)
         
         print(f"✓ Dataset processed successfully")
         print(f"  - Original files: {len(arrow_files)}")
@@ -375,10 +408,12 @@ def test_full_dataset_processing(arrow_path, whisper_processor_path, llm_tokeniz
         return False
 
 
-def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None):
+def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_tokenizer_path, max_samples=None, test_samples=None):
     """Test full dataset processing with TASTE pipeline - OPTIMIZED VERSION."""
     print(f"\n" + "=" * 50)
     print("TESTING FULL DATASET PROCESSING (FAST)")
+    if test_samples:
+        print(f"(Limited to {test_samples} samples for maximum speed)")
     print("=" * 50)
     
     try:
@@ -389,7 +424,7 @@ def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_to
         
         start_time = time.time()
         
-        # Determine arrow files to process
+        # Determine arrow files to process with fast sampling
         arrow_path_obj = Path(arrow_path)
         
         if arrow_path_obj.is_file() and arrow_path_obj.suffix == '.arrow':
@@ -401,10 +436,19 @@ def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_to
                 try:
                     from datasets import Dataset
                     dataset = Dataset.load_from_disk(arrow_path)
+                    
+                    # Fast sampling before processing
+                    if test_samples is not None and len(dataset) > test_samples:
+                        import random
+                        print(f"⚡ Fast sampling {test_samples} from {len(dataset)} samples")
+                        random.seed(42)
+                        indices = random.sample(range(len(dataset)), test_samples)
+                        dataset = dataset.select(indices)
+                    
                     temp_arrow = arrow_path_obj / "temp_test.arrow" 
                     dataset.save_to_disk(str(temp_arrow))
                     arrow_files = [str(temp_arrow)]
-                    print(f"⚡ Converted dataset directory to temporary file")
+                    print(f"⚡ Created optimized temp file ({len(dataset)} samples)")
                 except:
                     raise ValueError(f"No .arrow files found in directory: {arrow_path}")
             else:
@@ -424,6 +468,14 @@ def test_full_dataset_processing_fast(arrow_path, whisper_processor_path, llm_to
             streaming=False,
             num_proc=max_workers  # Maximum parallelization instead of 1
         )
+        
+        # Apply fast sampling after loading if needed (for multiple arrow files)
+        if test_samples is not None and len(processed_dataset) > test_samples and len(arrow_files) > 1:
+            import random
+            print(f"⚡ Post-processing sampling: {test_samples} from {len(processed_dataset)}")
+            random.seed(42)
+            indices = random.sample(range(len(processed_dataset)), test_samples)
+            processed_dataset = processed_dataset.select(indices)
         
         processing_time = time.time() - start_time
         print(f"⚡ Dataset processed in {processing_time:.2f}s!")
@@ -491,6 +543,8 @@ def main():
                        help='Maximum number of samples to test in full processing (default: 3)')
     parser.add_argument('--fast', action='store_true',
                        help='Use fast/optimized testing mode for better performance')
+    parser.add_argument('--test_samples', type=int, default=None,
+                       help='Maximum number of samples to use for testing (default: use all samples)')
     
     args = parser.parse_args()
     
@@ -503,7 +557,7 @@ def main():
     print("=" * 50)
     print("TESTING BASIC ARROW STRUCTURE")
     print("=" * 50)
-    basic_success, dataset = test_arrow_basic(args.arrow_path)
+    basic_success, dataset = test_arrow_basic(args.arrow_path, args.test_samples)
     
     if not basic_success:
         print("✗ Basic test failed. Cannot proceed with TASTE testing.")
@@ -539,7 +593,7 @@ def main():
         
         # Test full dataset processing
         full_success = full_test_fn(
-            args.arrow_path, args.whisper_processor, args.llm_tokenizer, args.max_samples
+            args.arrow_path, args.whisper_processor, args.llm_tokenizer, args.max_samples, args.test_samples
         )
         
         # Final results

@@ -1052,6 +1052,7 @@ def main():
             args.text_extensions
         )
         
+        
         # Run diagnostics if requested
         if args.diagnose_mp3:
             diagnose_mp3_files(pairs, max_samples=10)
