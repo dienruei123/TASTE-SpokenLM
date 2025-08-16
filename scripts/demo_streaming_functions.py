@@ -76,7 +76,7 @@ def main():
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
-    audio_path = 'examples/orig/ex01_happy_00209.wav'
+    audio_path = 'examples/orig/speaker_ref.wav'
     output_path = 'demo_output.wav'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     sampling_rate = 16000
