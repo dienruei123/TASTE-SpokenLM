@@ -264,7 +264,11 @@ def main():
                 if prev_asr_word_ids is None:
                     prev_asr_word_ids = current_asr_word_ids
                 else:
-                    prev_asr_word_ids = torch.cat([prev_asr_word_ids, current_asr_word_ids], dim=1)
+                    max_prev_word_id = prev_asr_word_ids.max().item()
+                    min_current_word_id = current_asr_word_ids.min().item()
+                    adjusted_asr_word_ids = current_asr_word_ids - min_current_word_id + max_prev_word_id + 1
+                    prev_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_asr_word_ids], dim=1)
+
                 if 'speech_ids' in result:
                     if prev_speech_ids.shape[1] == 0:
                         prev_speech_ids = result['speech_ids']
