@@ -1692,7 +1692,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         offset = 0
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
 
-        for top_id in prev_speech_ids[0, :-1]:
+        for top_id in prev_speech_ids[0, :-20]:
             y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
                 speech_lm_input, 
                 offset=0, 
