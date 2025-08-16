@@ -1639,35 +1639,44 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
             asr_token_lengths
         )
 
-        # prepare lm_input
-        if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
-            # Convert previous speech IDs to embeddings
-            prev_speech_embeds = self.speech_decoder.speech_embedding(prev_speech_ids)
-            # Calculate speech token lengths for previous speech IDs
-            prev_speech_lengths = torch.tensor([prev_speech_ids.shape[1]], 
-                                             device=prev_speech_ids.device, dtype=torch.long)
-            speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
-                sos_eos_emb,
-                speaker_embeds, 
-                audio_text_token_encoded,
-                audio_text_token_len, 
-                task_id_emb,
-                speech_token_embeds=prev_speech_embeds,
-                speech_token_lengths=prev_speech_lengths,
-                padding_side='right'
-            )
-        else:
-            speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
-                sos_eos_emb,
-                speaker_embeds, 
-                audio_text_token_encoded,
-                audio_text_token_len, 
-                task_id_emb,
-                padding_side='right'
-            )
+        # # prepare lm_input
+        # if prev_speech_ids is not None and prev_speech_ids.numel() > 0:
+        #     # Convert previous speech IDs to embeddings
+        #     prev_speech_embeds = self.speech_decoder.speech_embedding(prev_speech_ids)
+        #     # Calculate speech token lengths for previous speech IDs
+        #     prev_speech_lengths = torch.tensor([prev_speech_ids.shape[1]], 
+        #                                      device=prev_speech_ids.device, dtype=torch.long)
+        #     speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+        #         sos_eos_emb,
+        #         speaker_embeds, 
+        #         audio_text_token_encoded,
+        #         audio_text_token_len, 
+        #         task_id_emb,
+        #         speech_token_embeds=prev_speech_embeds,
+        #         speech_token_lengths=prev_speech_lengths,
+        #         padding_side='right'
+        #     )
+        # else:
+        #     speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+        #         sos_eos_emb,
+        #         speaker_embeds, 
+        #         audio_text_token_encoded,
+        #         audio_text_token_len, 
+        #         task_id_emb,
+        #         padding_side='right'
+        #     )
 
-        print('speech_lm_input', speech_lm_input[0,:,0:5])
-        print('speech_lm_input_len', speech_lm_input_len)
+        speech_lm_input, speech_lm_input_len = self.speech_decoder.pad_unpad_sequence(
+            sos_eos_emb,
+            speaker_embeds, 
+            audio_text_token_encoded,
+            audio_text_token_len, 
+            task_id_emb,
+            padding_side='right'
+        )
+
+        # print('speech_lm_input', speech_lm_input[0,:,0:5])
+        # print('speech_lm_input_len', speech_lm_input_len)
 
         beam_size = 1
         sampling = 25
@@ -1682,6 +1691,18 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         out_tokens = []
         offset = 0
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
+
+        for top_id in prev_speech_ids[0, :]:
+            y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
+                speech_lm_input, 
+                offset=0, 
+                required_cache_size=-1, 
+                att_cache=att_cache, 
+                cnn_cache=cnn_cache,
+                att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
+            )
+            speech_lm_input = self.speech_decoder.speech_embedding.weight[top_id].reshape(1, 1, -1)
+
         for i in range(max_len):
             y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
                 speech_lm_input, 
