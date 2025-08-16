@@ -136,6 +136,9 @@ def main():
         
         # Load the actual audio waveform
         audio_waveform, orig_sr = torchaudio.load(audio_path)
+        # Average stereo to mono if needed
+        if audio_waveform.shape[0] > 1:
+            audio_waveform = audio_waveform.mean(dim=0, keepdim=True)
         if orig_sr != sampling_rate:
             resampler = torchaudio.transforms.Resample(orig_sr, sampling_rate)
             audio_waveform = resampler(audio_waveform)
