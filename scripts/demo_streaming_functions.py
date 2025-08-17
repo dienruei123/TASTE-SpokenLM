@@ -45,7 +45,7 @@ def create_sentence_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, proc
     
     # Find sentence boundaries by looking for sentence-ending punctuation
     import re
-    sentence_endings = ['.', '!', '?', '。', '！', '？']  # Include Chinese punctuation
+    sentence_endings = ['.', '!', '?', '。', '！', '？', ',']  # Include Chinese punctuation
     
     # Find positions of sentence endings in the text
     sentence_end_positions = []
@@ -154,6 +154,8 @@ def create_word_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, words_pe
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
+    parser.add_argument('--input', type=str, default='examples/orig/hifi-tts-dev-clean-speaker6097/012.wav',
+                        help='Input audio file path (default: examples/orig/speaker_ref.wav)')
     parser.add_argument('--no-chunk', action='store_true', 
                         help='Disable chunking in step 4 (process all tokens at once)')
     parser.add_argument('--chunk-mode', choices=['sentence', 'word'], default='sentence',
@@ -174,7 +176,7 @@ def main():
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
-    audio_path = 'examples/orig/speaker_ref.wav'
+    audio_path = args.input
     output_path = 'demo_output.wav'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     sampling_rate = 16000
