@@ -1678,8 +1678,8 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         # print('speech_lm_input', speech_lm_input[0,:,0:5])
         # print('speech_lm_input_len', speech_lm_input_len)
 
-        beam_size = 1
-        sampling = 5
+        beam_size = 3
+        sampling = 15
         max_token_text_ratio = 20
         min_token_text_ratio = 2
 
