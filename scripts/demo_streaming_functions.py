@@ -164,6 +164,8 @@ def main():
                         help='Number of sentences per chunk when using sentence-based chunking (default: 1)')
     parser.add_argument('--words-per-chunk', type=int, default=2,
                         help='Number of words per chunk when using word-based chunking (default: 2)')
+    parser.add_argument('--max-prev-chunks', type=int, default=None,
+                        help='Maximum number of previous chunks to keep in context (default: None for unlimited)')
     args = parser.parse_args()
     
     print("=== TASTE Streaming Functions Demo ===")
@@ -173,6 +175,12 @@ def main():
         print(f"Chunking mode: ENABLED (sentence-based, {args.sentences_per_chunk} sentences per chunk)")
     else:
         print(f"Chunking mode: ENABLED (word-based, {args.words_per_chunk} words per chunk)")
+    
+    if not args.no_chunk:
+        if args.max_prev_chunks is None:
+            print("Previous context: UNLIMITED (all previous chunks)")
+        else:
+            print(f"Previous context: LIMITED to {args.max_prev_chunks} previous chunks")
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
@@ -342,9 +350,10 @@ def main():
             prev_asr_word_ids = None
             prev_audio_ms = 0
             
-            # Storage for merged outputs
+            # Storage for merged outputs and chunk tracking
             all_audio_chunks = []
             total_duration_ms = 0
+            processed_chunks = []  # Store all chunk info for context limiting
             
             # Process chunks
             for chunk_num, (current_asr_token_ids, current_asr_word_ids, current_asr_taste_ids) in enumerate(chunks, 1):
@@ -377,23 +386,64 @@ def main():
                 print(f"    - Chunk {chunk_num} audio shape: {chunk_audio.shape}")
                 print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
                 
-                # Update previous context for next iteration
-                prev_asr_token_ids = torch.cat([prev_asr_token_ids, current_asr_token_ids], dim=1)
-                prev_asr_taste_ids = torch.cat([prev_asr_taste_ids, current_asr_taste_ids], dim=1)
-                if prev_asr_word_ids is None:
-                    prev_asr_word_ids = current_asr_word_ids
+                # Store current chunk info
+                chunk_info = {
+                    'asr_token_ids': current_asr_token_ids,
+                    'asr_taste_ids': current_asr_taste_ids,
+                    'asr_word_ids': current_asr_word_ids,
+                    'speech_ids': result.get('speech_ids'),
+                    'duration_ms': chunk_duration_ms
+                }
+                processed_chunks.append(chunk_info)
+                
+                # Apply max_prev_chunks limit if specified
+                if args.max_prev_chunks is not None and len(processed_chunks) > args.max_prev_chunks:
+                    # Keep only the last max_prev_chunks chunks
+                    processed_chunks = processed_chunks[-args.max_prev_chunks:]
+                    print(f"    - Limited context to last {args.max_prev_chunks} chunks")
+                
+                # Rebuild previous context from stored chunks
+                if args.max_prev_chunks is None or len(processed_chunks) <= args.max_prev_chunks:
+                    # Use all processed chunks for unlimited or within limit
+                    chunks_to_use = processed_chunks[:-1]  # Exclude current chunk
                 else:
-                    max_prev_word_id = prev_asr_word_ids.max().item()
-                    min_current_word_id = current_asr_word_ids.min().item()
-                    adjusted_asr_word_ids = current_asr_word_ids - min_current_word_id + max_prev_word_id + 1
-                    prev_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_asr_word_ids], dim=1)
-
-                if 'speech_ids' in result:
-                    if prev_speech_ids.shape[1] == 0:
-                        prev_speech_ids = result['speech_ids']
-                    else:
-                        prev_speech_ids = torch.cat([prev_speech_ids, result['speech_ids']], dim=1)
-                prev_audio_ms += chunk_duration_ms
+                    # Use only the allowed number of previous chunks
+                    chunks_to_use = processed_chunks[-(args.max_prev_chunks+1):-1]  # Exclude current chunk
+                
+                # Rebuild previous context
+                if chunks_to_use:
+                    prev_asr_token_ids = torch.cat([chunk['asr_token_ids'] for chunk in chunks_to_use], dim=1)
+                    prev_asr_taste_ids = torch.cat([chunk['asr_taste_ids'] for chunk in chunks_to_use], dim=1)
+                    
+                    # Handle word IDs with proper adjustment
+                    prev_asr_word_ids = None
+                    for chunk in chunks_to_use:
+                        if prev_asr_word_ids is None:
+                            prev_asr_word_ids = chunk['asr_word_ids']
+                        else:
+                            max_prev_word_id = prev_asr_word_ids.max().item()
+                            min_current_word_id = chunk['asr_word_ids'].min().item()
+                            adjusted_asr_word_ids = chunk['asr_word_ids'] - min_current_word_id + max_prev_word_id + 1
+                            prev_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_asr_word_ids], dim=1)
+                    
+                    # Handle speech IDs
+                    prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+                    for chunk in chunks_to_use:
+                        if chunk['speech_ids'] is not None:
+                            if prev_speech_ids.shape[1] == 0:
+                                prev_speech_ids = chunk['speech_ids']
+                            else:
+                                prev_speech_ids = torch.cat([prev_speech_ids, chunk['speech_ids']], dim=1)
+                    
+                    # Calculate cumulative audio duration
+                    prev_audio_ms = sum(chunk['duration_ms'] for chunk in chunks_to_use)
+                else:
+                    # No previous chunks to use (first chunk or all cleared)
+                    prev_asr_token_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+                    prev_asr_taste_ids = torch.empty(1, 0, 4, dtype=torch.long, device=device)
+                    prev_speech_ids = torch.empty(1, 0, dtype=torch.long, device=device)
+                    prev_asr_word_ids = None
+                    prev_audio_ms = 0
                 
                 print(f"    - Updated prev_asr_token_ids shape: {prev_asr_token_ids.shape}")
                 print(f"    - Updated prev_asr_taste_ids shape: {prev_asr_taste_ids.shape}")
