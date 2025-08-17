@@ -36,7 +36,7 @@ def create_sentence_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, proc
     
     # Decode tokens to text to find sentence boundaries
     try:
-        full_text = processor.asr_tokenizer.decode(asr_token_ids.squeeze(0), skip_special_tokens=True)
+        full_text = processor.audio_tokenizer.decode(asr_token_ids.squeeze(0), skip_special_tokens=True)
     except Exception as e:
         print(e)
         # Fallback to word-based chunking if decoding fails
