@@ -7,6 +7,7 @@ detokenization functions using an example audio file.
 """
 
 import os
+import time
 import torch
 import torchaudio
 import argparse
@@ -339,14 +340,17 @@ def main(args=None):
             all_audio_chunks = []
             total_duration_ms = 0
             processed_chunks = []  # Store all chunk info for context limiting
+            chunk_timing_stats = []  # Store timing stats for each chunk
             
             # Process chunks
             for chunk_num, (current_asr_token_ids, current_asr_word_ids, current_asr_taste_ids) in enumerate(chunks, 1):
+                chunk_start_time = time.time()
                 print(f"  Processing {chunk_type} chunk {chunk_num}/{len(chunks)}")
                 print(f"    - Chunk tokens shape: {current_asr_token_ids.shape}")
                 print(f"    - Chunk word_ids: {torch.unique(current_asr_word_ids).tolist()}")
                 
                 # Call taste_detokenize with previous context
+                detokenize_start_time = time.time()
                 result = taste_detokenize(
                     model=model,
                     processor=processor,
@@ -361,6 +365,8 @@ def main(args=None):
                     prev_asr_word_ids=prev_asr_word_ids,
                     out_sampling_rate=sampling_rate
                 )
+                detokenize_end_time = time.time()
+                detokenize_time_ms = (detokenize_end_time - detokenize_start_time) * 1000
                 
                 # Store this chunk's audio
                 chunk_audio = result['audio_waveform']
@@ -370,6 +376,7 @@ def main(args=None):
                 
                 print(f"    - Chunk {chunk_num} audio shape: {chunk_audio.shape}")
                 print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
+                print(f"    - Chunk {chunk_num} detokenize time: {detokenize_time_ms:.2f} ms")
                 
                 # Store current chunk info
                 chunk_info = {
@@ -388,6 +395,7 @@ def main(args=None):
                     print(f"    - Limited context to last {args.max_prev_chunks} chunks")
                 
                 # Rebuild previous context from stored chunks
+                context_start_time = time.time()
                 if args.max_prev_chunks is None or len(processed_chunks) <= args.max_prev_chunks:
                     # Use all processed chunks for unlimited or within limit
                     chunks_to_use = processed_chunks[:-1]  # Exclude current chunk
@@ -430,10 +438,28 @@ def main(args=None):
                     prev_asr_word_ids = None
                     prev_audio_ms = 0
                 
+                context_end_time = time.time()
+                context_time_ms = (context_end_time - context_start_time) * 1000
+                
                 print(f"    - Updated prev_asr_token_ids shape: {prev_asr_token_ids.shape}")
                 print(f"    - Updated prev_asr_taste_ids shape: {prev_asr_taste_ids.shape}")
                 print(f"    - Cumulative audio_ms: {prev_audio_ms}")
+                print(f"    - Context processing time: {context_time_ms:.2f} ms")
 
+                chunk_end_time = time.time()
+                total_chunk_time_ms = (chunk_end_time - chunk_start_time) * 1000
+                
+                # Store timing stats for this chunk
+                chunk_timing = {
+                    'chunk_num': chunk_num,
+                    'context_time_ms': context_time_ms,
+                    'detokenize_time_ms': detokenize_time_ms,
+                    'total_time_ms': total_chunk_time_ms,
+                    'audio_duration_ms': chunk_duration_ms
+                }
+                chunk_timing_stats.append(chunk_timing)
+                
+                print(f"    - Total chunk processing time: {total_chunk_time_ms:.2f} ms")
                 print(f"  Save...")
                 output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
                 output_sr = result['sampling_rate']  # Use the last result's sampling rate
@@ -450,6 +476,49 @@ def main(args=None):
             print(f"  - Final output audio shape: {output_audio.shape}")
             print(f"  - Output sampling rate: {output_sr}")
             print(f"  - Total duration: {total_duration_ms} ms")
+            
+            # Print detailed timing statistics for each chunk
+            print(f"\n=== Chunk Processing Time Statistics ===")
+            print(f"{'Chunk':<6} {'Context(ms)':<12} {'Detokenize(ms)':<15} {'Total(ms)':<10} {'Audio(ms)':<10} {'Efficiency':<10}")
+            print("-" * 75)
+            
+            total_context_time = 0
+            total_detokenize_time = 0
+            total_processing_time = 0
+            
+            for stats in chunk_timing_stats:
+                chunk_num = stats['chunk_num']
+                context_time = stats['context_time_ms']
+                detokenize_time = stats['detokenize_time_ms']
+                total_time = stats['total_time_ms']
+                audio_duration = stats['audio_duration_ms']
+                
+                # Calculate efficiency ratio (audio duration / processing time)
+                efficiency = audio_duration / total_time if total_time > 0 else 0
+                
+                print(f"{chunk_num:<6} {context_time:<12.2f} {detokenize_time:<15.2f} {total_time:<10.2f} {audio_duration:<10.2f} {efficiency:<10.2f}x")
+                
+                total_context_time += context_time
+                total_detokenize_time += detokenize_time
+                total_processing_time += total_time
+            
+            print("-" * 75)
+            print(f"{'Total':<6} {total_context_time:<12.2f} {total_detokenize_time:<15.2f} {total_processing_time:<10.2f} {total_duration_ms:<10.2f} {total_duration_ms/total_processing_time:<10.2f}x")
+            
+            # Calculate average times
+            num_chunks = len(chunk_timing_stats)
+            if num_chunks > 0:
+                avg_context_time = total_context_time / num_chunks
+                avg_detokenize_time = total_detokenize_time / num_chunks
+                avg_total_time = total_processing_time / num_chunks
+                avg_audio_duration = total_duration_ms / num_chunks
+                
+                print(f"\n=== Average Times Per Chunk ===")
+                print(f"Context processing: {avg_context_time:.2f} ms")
+                print(f"Detokenization: {avg_detokenize_time:.2f} ms")
+                print(f"Total processing: {avg_total_time:.2f} ms")
+                print(f"Audio generated: {avg_audio_duration:.2f} ms")
+                print(f"Overall efficiency: {total_duration_ms/total_processing_time:.2f}x (audio_duration/processing_time)")
             
         except Exception as e:
             print(f"Error during chunked detokenization: {e}")
