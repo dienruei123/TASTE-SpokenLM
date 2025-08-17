@@ -1692,21 +1692,24 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
         offset = 0
         att_cache, cnn_cache = torch.zeros((0, 0, 0, 0), device=device), torch.zeros((0, 0, 0, 0), device=device)
 
-        for top_id in prev_speech_ids[0, :-1]:
-            y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
-                speech_lm_input, 
-                offset=0, 
-                required_cache_size=-1, 
-                att_cache=att_cache, 
-                cnn_cache=cnn_cache,
-                att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
-            )
-            speech_lm_input = self.speech_decoder.speech_embedding.weight[top_id].reshape(1, 1, -1)
+        if prev_speech_ids is not None:
+            for top_id in prev_speech_ids[0, :]:
+                y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
+                    speech_lm_input, 
+                    offset=offset, 
+                    required_cache_size=-1, 
+                    att_cache=att_cache, 
+                    cnn_cache=cnn_cache,
+                    att_mask=torch.tril(torch.ones((1, speech_lm_input.shape[1], speech_lm_input.shape[1]), device=device)).to(torch.bool)
+                )
+                speech_lm_input = self.speech_decoder.speech_embedding.weight[top_id].reshape(1, 1, -1)
+                offset += speech_lm_input.size(1)
+            max_len -= prev_speech_ids.size(1)
 
         for i in range(max_len):
             y_pred, att_cache, cnn_cache = self.speech_decoder.llm.forward_chunk(
                 speech_lm_input, 
-                offset=0, 
+                offset=offset, 
                 required_cache_size=-1, 
                 att_cache=att_cache, 
                 cnn_cache=cnn_cache,
