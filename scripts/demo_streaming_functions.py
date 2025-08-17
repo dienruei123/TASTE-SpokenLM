@@ -390,13 +390,21 @@ def main(args=None):
                 
                 # Apply max_prev_chunks limit if specified
                 if args.max_prev_chunks is not None and len(processed_chunks) > args.max_prev_chunks:
-                    # Keep only the last max_prev_chunks chunks
-                    processed_chunks = processed_chunks[-args.max_prev_chunks:]
-                    print(f"    - Limited context to last {args.max_prev_chunks} chunks")
+                    if args.max_prev_chunks == 0:
+                        # Keep only current chunk (no previous chunks)
+                        processed_chunks = [processed_chunks[-1]]
+                        print(f"    - Limited context to 0 previous chunks")
+                    else:
+                        # Keep only the last max_prev_chunks chunks
+                        processed_chunks = processed_chunks[-args.max_prev_chunks:]
+                        print(f"    - Limited context to last {args.max_prev_chunks} chunks")
                 
                 # Rebuild previous context from stored chunks
                 context_start_time = time.time()
-                if args.max_prev_chunks is None or len(processed_chunks) <= args.max_prev_chunks:
+                if args.max_prev_chunks == 0:
+                    # No previous chunks allowed
+                    chunks_to_use = []
+                elif args.max_prev_chunks is None or len(processed_chunks) <= args.max_prev_chunks:
                     # Use all processed chunks for unlimited or within limit
                     chunks_to_use = processed_chunks[:-1]  # Exclude current chunk
                 else:
