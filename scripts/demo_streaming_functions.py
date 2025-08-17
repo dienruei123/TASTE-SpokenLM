@@ -248,7 +248,7 @@ def main():
         print(f"  - Speaker embeds shape: {speaker_embeds.shape}")
         print(f"  - ASR token IDs shape: {asr_token_ids.shape}")
         print(f"  - Audio waveform shape: {audio_waveform.shape}")
-        print(f"  - Text: {processed_data.get('text', [''])[0][:100]}...")
+        print(f"  - Text: {processed_data.get('text', [''])[0]}")
         
     except Exception as e:
         print(f"Error processing audio: {e}")
