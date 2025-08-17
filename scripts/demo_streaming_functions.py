@@ -17,6 +17,94 @@ from taste_speech import TasteForCausalLM, TasteProcessor
 from taste_speech.streaming import taste_tokenize, taste_detokenize
 
 
+def create_sentence_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, processor, max_sentences_per_chunk=1):
+    """
+    Create chunks based on sentence boundaries by detecting punctuation.
+    
+    Args:
+        asr_token_ids: ASR token IDs tensor of shape (1, seq_len)
+        asr_word_ids: Word IDs tensor of shape (1, seq_len) 
+        taste_tokens: TASTE tokens tensor of shape (1, seq_len, vq_dim)
+        processor: TasteProcessor to decode tokens
+        max_sentences_per_chunk: Maximum number of sentences to include in each chunk
+        
+    Returns:
+        List of tuples: [(chunk_asr_tokens, chunk_asr_word_ids, chunk_taste_tokens), ...]
+    """
+    chunks = []
+    seq_len = asr_token_ids.shape[1]
+    
+    # Decode tokens to text to find sentence boundaries
+    try:
+        full_text = processor.asr_tokenizer.decode(asr_token_ids.squeeze(0), skip_special_tokens=True)
+    except:
+        # Fallback to word-based chunking if decoding fails
+        print("Warning: Failed to decode tokens for sentence detection, falling back to word-based chunking")
+        return create_word_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, words_per_chunk=10)
+    
+    # Find sentence boundaries by looking for sentence-ending punctuation
+    import re
+    sentence_endings = ['.', '!', '?', '。', '！', '？']  # Include Chinese punctuation
+    
+    # Find positions of sentence endings in the text
+    sentence_end_positions = []
+    for i, char in enumerate(full_text):
+        if char in sentence_endings:
+            sentence_end_positions.append(i)
+    
+    if not sentence_end_positions:
+        # No sentence endings found, treat as one chunk
+        return [(asr_token_ids, asr_word_ids, taste_tokens)]
+    
+    # Map character positions to token positions
+    word_ids_flat = asr_word_ids.squeeze(0)  # Remove batch dimension
+    unique_word_ids = torch.unique(word_ids_flat, sorted=True)
+    
+    # Group sentences into chunks
+    current_chunk_start = 0
+    sentence_count = 0
+    
+    for end_pos in sentence_end_positions:
+        sentence_count += 1
+        
+        if sentence_count >= max_sentences_per_chunk:
+            # Find the approximate token position for this sentence end
+            # Use a heuristic: character position / total characters * total tokens
+            approx_token_pos = min(int((end_pos + 1) / len(full_text) * seq_len), seq_len - 1)
+            
+            # Find the nearest word boundary
+            end_token_idx = approx_token_pos
+            while end_token_idx < seq_len - 1:
+                current_word_id = word_ids_flat[end_token_idx].item()
+                next_word_id = word_ids_flat[end_token_idx + 1].item()
+                if current_word_id != next_word_id:  # Word boundary found
+                    break
+                end_token_idx += 1
+            
+            end_token_idx = min(end_token_idx + 1, seq_len)  # Include the current token
+            
+            # Create chunk
+            if end_token_idx > current_chunk_start:
+                chunk_asr_tokens = asr_token_ids[:, current_chunk_start:end_token_idx]
+                chunk_asr_word_ids = asr_word_ids[:, current_chunk_start:end_token_idx]
+                chunk_taste_tokens = taste_tokens[:, current_chunk_start:end_token_idx, :]
+                
+                chunks.append((chunk_asr_tokens, chunk_asr_word_ids, chunk_taste_tokens))
+                
+                current_chunk_start = end_token_idx
+                sentence_count = 0
+    
+    # Add remaining tokens as the last chunk
+    if current_chunk_start < seq_len:
+        chunk_asr_tokens = asr_token_ids[:, current_chunk_start:]
+        chunk_asr_word_ids = asr_word_ids[:, current_chunk_start:]
+        chunk_taste_tokens = taste_tokens[:, current_chunk_start:, :]
+        
+        chunks.append((chunk_asr_tokens, chunk_asr_word_ids, chunk_taste_tokens))
+    
+    return chunks
+
+
 def create_word_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, words_per_chunk=2):
     """
     Create chunks based on word boundaries using word_ids.
@@ -67,12 +155,21 @@ def main():
     parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
     parser.add_argument('--no-chunk', action='store_true', 
                         help='Disable chunking in step 4 (process all tokens at once)')
+    parser.add_argument('--chunk-mode', choices=['sentence', 'word'], default='sentence',
+                        help='Chunking mode: sentence-based or word-based (default: sentence)')
+    parser.add_argument('--sentences-per-chunk', type=int, default=1,
+                        help='Number of sentences per chunk when using sentence-based chunking (default: 1)')
     parser.add_argument('--words-per-chunk', type=int, default=2,
                         help='Number of words per chunk when using word-based chunking (default: 2)')
     args = parser.parse_args()
     
     print("=== TASTE Streaming Functions Demo ===")
-    print(f"Chunking mode: {'DISABLED' if args.no_chunk else f'ENABLED (word-based, {args.words_per_chunk} words per chunk)'}")
+    if args.no_chunk:
+        print("Chunking mode: DISABLED")
+    elif args.chunk_mode == 'sentence':
+        print(f"Chunking mode: ENABLED (sentence-based, {args.sentences_per_chunk} sentences per chunk)")
+    else:
+        print(f"Chunking mode: ENABLED (word-based, {args.words_per_chunk} words per chunk)")
     
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
@@ -206,18 +303,34 @@ def main():
             traceback.print_exc()
             return
     else:
-        print("\n4. Converting TASTE tokens back to audio with word-based chunking...")
+        print("\n4. Converting TASTE tokens back to audio with chunking...")
         try:
-            # Create word-based chunks
-            word_chunks = create_word_based_chunks(
-                asr_token_ids, asr_word_ids, taste_tokens, 
-                words_per_chunk=args.words_per_chunk
-            )
-            
-            print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
-            print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
-            print(f"  - Total word-based chunks: {len(word_chunks)}")
-            print(f"  - Words per chunk: {args.words_per_chunk}")
+            if args.chunk_mode == 'sentence':
+                print("  Using sentence-based chunking...")
+                # Create sentence-based chunks
+                chunks = create_sentence_based_chunks(
+                    asr_token_ids, asr_word_ids, taste_tokens, processor,
+                    max_sentences_per_chunk=args.sentences_per_chunk
+                )
+                
+                print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
+                print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
+                print(f"  - Total sentence-based chunks: {len(chunks)}")
+                print(f"  - Sentences per chunk: {args.sentences_per_chunk}")
+                chunk_type = "sentence"
+            else:
+                print("  Using word-based chunking...")
+                # Create word-based chunks
+                chunks = create_word_based_chunks(
+                    asr_token_ids, asr_word_ids, taste_tokens, 
+                    words_per_chunk=args.words_per_chunk
+                )
+                
+                print(f"  - Total text tokens: {asr_token_ids.shape[1]}")
+                print(f"  - Total taste tokens: {taste_tokens.shape[1]}")
+                print(f"  - Total word-based chunks: {len(chunks)}")
+                print(f"  - Words per chunk: {args.words_per_chunk}")
+                chunk_type = "word"
             
             # Initialize previous context (empty at start)
             prev_asr_token_ids = torch.empty(1, 0, dtype=torch.long, device=device)
@@ -230,9 +343,9 @@ def main():
             all_audio_chunks = []
             total_duration_ms = 0
             
-            # Process word-based chunks
-            for chunk_num, (current_asr_token_ids, current_asr_word_ids, current_asr_taste_ids) in enumerate(word_chunks, 1):
-                print(f"  Processing word chunk {chunk_num}/{len(word_chunks)}")
+            # Process chunks
+            for chunk_num, (current_asr_token_ids, current_asr_word_ids, current_asr_taste_ids) in enumerate(chunks, 1):
+                print(f"  Processing {chunk_type} chunk {chunk_num}/{len(chunks)}")
                 print(f"    - Chunk tokens shape: {current_asr_token_ids.shape}")
                 print(f"    - Chunk word_ids: {torch.unique(current_asr_word_ids).tolist()}")
                 
@@ -295,7 +408,7 @@ def main():
             output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
             output_sr = result['sampling_rate']  # Use the last result's sampling rate
             
-            print(f"✓ Word-based chunked audio detokenized successfully")
+            print(f"✓ {chunk_type.capitalize()}-based chunked audio detokenized successfully")
             print(f"  - Final output audio shape: {output_audio.shape}")
             print(f"  - Output sampling rate: {output_sr}")
             print(f"  - Total duration: {total_duration_ms} ms")
@@ -330,10 +443,16 @@ def main():
         print(f"Successfully tested non-chunked processing!")
         print(f"All tokens were processed at once without chunking.")
     else:
-        print(f"Successfully tested word-based chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
-        print(f"The word-based chunked approach simulates real streaming conditions where")
-        print(f"previous context is maintained across multiple detokenization calls, with chunks")
-        print(f"aligned to word boundaries for more natural speech synthesis.")
+        if args.chunk_mode == 'sentence':
+            print(f"Successfully tested sentence-based chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
+            print(f"The sentence-based chunked approach simulates real streaming conditions where")
+            print(f"previous context is maintained across multiple detokenization calls, with chunks")
+            print(f"aligned to sentence boundaries for more natural speech synthesis.")
+        else:
+            print(f"Successfully tested word-based chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
+            print(f"The word-based chunked approach simulates real streaming conditions where")
+            print(f"previous context is maintained across multiple detokenization calls, with chunks")
+            print(f"aligned to word boundaries for more natural speech synthesis.")
     print(f"You can now listen to the original audio ({audio_path}) and")
     print(f"the reconstructed audio ({output_path}) to compare the quality.")
 
