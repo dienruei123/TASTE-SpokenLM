@@ -1727,7 +1727,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
             out_tokens.append(top_ids)
             offset += speech_lm_input.size(1)
             speech_lm_input = self.speech_decoder.speech_embedding.weight[top_ids].reshape(1, 1, -1)
-            print('speech_lm_input', speech_lm_input[0,:,0:5])
+            # print('speech_lm_input', speech_lm_input[0,:,0:5])
 
         speech_token_ids = torch.tensor([out_tokens], dtype=torch.int32, device=device)
         speech_token_lengths = torch.tensor([len(out_tokens)], dtype=torch.int32, device=device)
