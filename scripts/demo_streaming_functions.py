@@ -151,22 +151,7 @@ def create_word_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, words_pe
     return chunks
 
 
-def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
-    parser.add_argument('--input', type=str, default='examples/orig/hifi-tts-dev-clean-speaker6097/012.wav',
-                        help='Input audio file path (default: examples/orig/speaker_ref.wav)')
-    parser.add_argument('--no-chunk', action='store_true', 
-                        help='Disable chunking in step 4 (process all tokens at once)')
-    parser.add_argument('--chunk-mode', choices=['sentence', 'word'], default='sentence',
-                        help='Chunking mode: sentence-based or word-based (default: sentence)')
-    parser.add_argument('--sentences-per-chunk', type=int, default=1,
-                        help='Number of sentences per chunk when using sentence-based chunking (default: 1)')
-    parser.add_argument('--words-per-chunk', type=int, default=2,
-                        help='Number of words per chunk when using word-based chunking (default: 2)')
-    parser.add_argument('--max-prev-chunks', type=int, default=None,
-                        help='Maximum number of previous chunks to keep in context (default: None for unlimited)')
-    args = parser.parse_args()
+def main(args=None):
     
     print("=== TASTE Streaming Functions Demo ===")
     if args.no_chunk:
@@ -511,4 +496,20 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
+    parser.add_argument('--input', type=str, default='examples/orig/hifi-tts-dev-clean-speaker6097/012.wav',
+                        help='Input audio file path (default: examples/orig/speaker_ref.wav)')
+    parser.add_argument('--no-chunk', action='store_true', 
+                        help='Disable chunking in step 4 (process all tokens at once)')
+    parser.add_argument('--chunk-mode', choices=['sentence', 'word'], default='sentence',
+                        help='Chunking mode: sentence-based or word-based (default: sentence)')
+    parser.add_argument('--sentences-per-chunk', type=int, default=1,
+                        help='Number of sentences per chunk when using sentence-based chunking (default: 1)')
+    parser.add_argument('--words-per-chunk', type=int, default=2,
+                        help='Number of words per chunk when using word-based chunking (default: 2)')
+    parser.add_argument('--max-prev-chunks', type=int, default=None,
+                        help='Maximum number of previous chunks to keep in context (default: None for unlimited)')
+    args = parser.parse_args()
+    
+    main(args)
