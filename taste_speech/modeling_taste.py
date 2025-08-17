@@ -1721,7 +1721,7 @@ class TasteForCausalLM(TastePreTrainedModel, GenerationMixin):
                 sampling, 
                 beam_size, 
                 ignore_eos=True if i < min_len else False
-            ).item()
+            )[0].item()
             if top_ids == self.speech_decoder.speech_token_size:
                 break
             out_tokens.append(top_ids)
