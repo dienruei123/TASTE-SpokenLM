@@ -261,18 +261,27 @@ def main():
                 print(f"    - Chunk {chunk_num} audio shape: {chunk_audio.shape}")
                 print(f"    - Chunk {chunk_num} duration: {chunk_duration_ms} ms")
                 
-                # Update previous context for next iteration (only use current chunk, not accumulate)
-                prev_asr_token_ids = current_asr_token_ids
-                prev_asr_taste_ids = current_asr_taste_ids
-                prev_asr_word_ids = current_asr_word_ids
+                # Update previous context for next iteration
+                prev_asr_token_ids = torch.cat([prev_asr_token_ids, current_asr_token_ids], dim=1)
+                prev_asr_taste_ids = torch.cat([prev_asr_taste_ids, current_asr_taste_ids], dim=1)
+                if prev_asr_word_ids is None:
+                    prev_asr_word_ids = current_asr_word_ids
+                else:
+                    max_prev_word_id = prev_asr_word_ids.max().item()
+                    min_current_word_id = current_asr_word_ids.min().item()
+                    adjusted_asr_word_ids = current_asr_word_ids - min_current_word_id + max_prev_word_id + 1
+                    prev_asr_word_ids = torch.cat([prev_asr_word_ids, adjusted_asr_word_ids], dim=1)
 
                 if 'speech_ids' in result:
-                    prev_speech_ids = result['speech_ids']
-                prev_audio_ms = chunk_duration_ms
+                    if prev_speech_ids.shape[1] == 0:
+                        prev_speech_ids = result['speech_ids']
+                    else:
+                        prev_speech_ids = torch.cat([prev_speech_ids, result['speech_ids']], dim=1)
+                prev_audio_ms += chunk_duration_ms
                 
                 print(f"    - Updated prev_asr_token_ids shape: {prev_asr_token_ids.shape}")
                 print(f"    - Updated prev_asr_taste_ids shape: {prev_asr_taste_ids.shape}")
-                print(f"    - Current chunk audio_ms: {prev_audio_ms}")
+                print(f"    - Cumulative audio_ms: {prev_audio_ms}")
 
                 print(f"  Save...")
                 output_audio = torch.cat(all_audio_chunks, dim=-1)  # Concatenate along time dimension
@@ -323,7 +332,7 @@ def main():
     else:
         print(f"Successfully tested word-based chunked streaming with prev_asr_token_ids and prev_asr_taste_ids!")
         print(f"The word-based chunked approach simulates real streaming conditions where")
-        print(f"only the immediately previous chunk context is used for each detokenization call, with chunks")
+        print(f"previous context is maintained across multiple detokenization calls, with chunks")
         print(f"aligned to word boundaries for more natural speech synthesis.")
     print(f"You can now listen to the original audio ({audio_path}) and")
     print(f"the reconstructed audio ({output_path}) to compare the quality.")
