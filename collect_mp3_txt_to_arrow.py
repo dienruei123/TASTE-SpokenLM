@@ -215,6 +215,7 @@ def list_corrupted_files(pairs: List[Tuple[str, str]], min_file_size: int = 1024
 def discover_random_string_folders(input_dir: str, min_depth: int = 1) -> List[str]:
     """
     Discover all folders containing audio/text pairs for chunked processing.
+    Now supports arbitrary directory depths by finding ALL folders with audio/text pairs.
     
     Args:
         input_dir: Root directory to search in
@@ -228,7 +229,7 @@ def discover_random_string_folders(input_dir: str, min_depth: int = 1) -> List[s
     
     logging.info("Discovering folders with audio/text pairs for chunked processing...")
     
-    # Walk through directory structure and identify folders with audio/text files
+    # Walk through directory structure and identify ALL folders with audio/text files
     total_dirs_scanned = 0
     total_files_found = 0
     for root, dirs, files in os.walk(input_dir):
@@ -237,7 +238,7 @@ def discover_random_string_folders(input_dir: str, min_depth: int = 1) -> List[s
         
         # Look for folders at appropriate depth that contain audio/text files
         if current_depth >= min_depth:
-            # Check if this directory contains audio/text files (leaf folder)
+            # Check if this directory directly contains audio/text files
             audio_files = [f for f in files if f.lower().endswith(('.mp3', '.wav', '.flac'))]
             text_files = [f for f in files if f.lower().endswith('.txt')]
             
@@ -246,8 +247,8 @@ def discover_random_string_folders(input_dir: str, min_depth: int = 1) -> List[s
                 random_folders.append(root)
                 total_files_found += len(files)
                 print(f"📂 Found folder #{len(random_folders)}: {folder_name} (depth {current_depth}) - {len(audio_files)} audio, {len(text_files)} text, {len(files)} total files")
-                # Don't traverse deeper into this folder since it's a leaf
-                dirs.clear()
+                # REMOVED: dirs.clear() - Continue traversing deeper to find all folders
+                # This allows finding nested folders at any depth
     
     logging.info(f"Scanned {total_dirs_scanned} directories total")
     logging.info(f"Found {len(random_folders)} folders with audio/text pairs to process")
@@ -363,6 +364,10 @@ def find_audio_text_pairs(input_dir: str, audio_extensions: List[str] = None,
     """
     Legacy function - redirects to optimized version.
     """
+    if audio_extensions is None:
+        audio_extensions = ['.mp3']
+    if text_extensions is None:
+        text_extensions = ['.txt']
     return find_audio_text_pairs_optimized(input_dir, audio_extensions, text_extensions)
 
 
@@ -461,6 +466,75 @@ def load_text(text_path: str, encoding: str = 'utf-8') -> str:
             except UnicodeDecodeError:
                 continue
         raise ValueError(f"Could not decode text file {text_path}")
+
+
+def process_chunk(chunk_pairs: List[Tuple[str, str]], chunk_name: str, intermediate_dir: str,
+                 target_sr: int = 16000, text_encoding: str = 'utf-8', min_file_size: int = 1024) -> Optional[str]:
+    """
+    Process a chunk of audio-text pairs and save to intermediate .arrow file.
+    
+    Args:
+        chunk_pairs: List of (audio_path, text_path) tuples to process
+        chunk_name: Name for this chunk (used in filename)
+        intermediate_dir: Directory to save intermediate files
+        target_sr: Target sample rate
+        text_encoding: Text file encoding
+        min_file_size: Minimum file size validation
+        
+    Returns:
+        Path to created intermediate file, or None if no valid samples
+    """
+    intermediate_path = Path(intermediate_dir)
+    intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    # Generate intermediate file name
+    intermediate_file = intermediate_path / f"intermediate_{chunk_name}.arrow"
+    
+    # Skip if already processed
+    if intermediate_file.exists():
+        print(f"⚡ Skipping already processed chunk: {chunk_name}")
+        return str(intermediate_file)
+    
+    try:
+        # Process samples from this chunk
+        samples = []
+        failed_count = 0
+        
+        for audio_path, text_path in chunk_pairs:
+            try:
+                # Use filename prefix as sample_id
+                audio_filename = Path(audio_path).stem
+                sample_id = audio_filename
+                
+                # Create sample with validation
+                sample = create_sample(audio_path, text_path, sample_id, target_sr, text_encoding, min_file_size)
+                samples.append(sample)
+                
+            except Exception as e:
+                failed_count += 1
+                logging.debug(f"Skipping corrupted file {Path(audio_path).stem} in {chunk_name}: {e}")
+                continue
+        
+        if not samples:
+            print(f"❌ No valid samples created from chunk: {chunk_name} ({failed_count} failed)")
+            return None
+        
+        # Create and save intermediate dataset
+        intermediate_dataset = Dataset.from_list(samples)
+        intermediate_dataset.save_to_disk(str(intermediate_file))
+        
+        success_rate = len(samples) / len(chunk_pairs) * 100
+        print(f"✅ Completed chunk: {chunk_name} - {len(samples)}/{len(chunk_pairs)} samples processed ({success_rate:.1f}% success, {failed_count} failed)")
+        
+        # Clear memory
+        del samples, intermediate_dataset
+        gc.collect()
+        
+        return str(intermediate_file)
+        
+    except Exception as e:
+        logging.error(f"Failed to process chunk {chunk_name}: {e}")
+        return None
 
 
 def process_single_folder(folder_path: str, intermediate_dir: str, target_sr: int = 16000,
@@ -708,61 +782,69 @@ def merge_intermediate_files(intermediate_files: List[str], final_output: str) -
 
 def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_sr: int = 16000,
                                 text_encoding: str = 'utf-8', min_file_size: int = 1024,
-                                folders_per_batch: int = 1000, max_workers: int = None) -> Dataset:
+                                files_per_chunk: int = 10000, max_workers: int = None) -> Dataset:
     """
-    Create dataset using folder-by-folder chunked processing for large datasets.
+    Create dataset using file-based chunked processing for large datasets.
     
     Args:
-        input_dir: Input directory containing random-string folders
+        input_dir: Input directory containing audio and text files
         intermediate_dir: Directory for temporary intermediate files  
         target_sr: Target sample rate
         text_encoding: Text encoding
         min_file_size: Minimum file size validation
-        folders_per_batch: Process this many folders before creating intermediate file
+        files_per_chunk: Process this many file pairs per chunk (default: 10000)
         max_workers: Number of parallel workers
         
     Returns:
         Final dataset
     """
-    # Discover all random-string folders
-    random_folders = discover_random_string_folders(input_dir)
+    # First, find all audio-text pairs in the directory
+    logging.info(f"Finding audio-text pairs in {input_dir}")
+    pairs = find_audio_text_pairs_optimized(input_dir)
     
-    if not random_folders:
-        raise ValueError(f"No random-string folders found in {input_dir}")
+    if not pairs:
+        raise ValueError(f"No audio-text pairs found in {input_dir}")
     
-    logging.info(f"Processing {len(random_folders)} folders with chunked approach")
+    logging.info(f"Found {len(pairs)} audio-text pairs")
+    logging.info(f"Processing in chunks of {files_per_chunk} files")
     
     # Create intermediate directory
     intermediate_path = Path(intermediate_dir)
     intermediate_path.mkdir(parents=True, exist_ok=True)
     
-    # Process folders and collect intermediate files
-    intermediate_files = []
-    processed_count = 0
+    # Split pairs into chunks
+    chunks = []
+    for i in range(0, len(pairs), files_per_chunk):
+        chunk_pairs = pairs[i:i + files_per_chunk]
+        chunks.append(chunk_pairs)
     
-    for i, folder_path in enumerate(random_folders):
-        folder_name = Path(folder_path).name
+    logging.info(f"Created {len(chunks)} chunks for processing")
+    
+    # Process chunks and collect intermediate files
+    intermediate_files = []
+    
+    for chunk_id, chunk_pairs in enumerate(chunks):
+        chunk_name = f"chunk_{chunk_id:04d}"
         
-        # Progress indicator (every directory)
-        progress = ((i + 1) / len(random_folders)) * 100
-        print(f"\r📁 Processing: {folder_name}... ({i+1:,}/{len(random_folders):,} - {progress:.1f}%)", end='', flush=True)
+        # Progress indicator
+        progress = ((chunk_id + 1) / len(chunks)) * 100
+        print(f"\r🔄 Processing chunk {chunk_id + 1}/{len(chunks)}: {len(chunk_pairs)} files ({progress:.1f}%)", end='', flush=True)
         
-        # Process single folder
-        intermediate_file = process_single_folder(
-            folder_path, intermediate_dir, target_sr, text_encoding, min_file_size
+        # Process chunk
+        intermediate_file = process_chunk(
+            chunk_pairs, chunk_name, intermediate_dir, target_sr, text_encoding, min_file_size
         )
         
         if intermediate_file:
             intermediate_files.append(intermediate_file)
-            processed_count += 1
         
         # Memory management
-        if (i + 1) % 100 == 0:
+        if (chunk_id + 1) % 10 == 0:
             gc.collect()
     
     print()  # New line after progress
     
-    logging.info(f"Successfully processed {processed_count}/{len(random_folders)} folders")
+    logging.info(f"Successfully processed {len(intermediate_files)}/{len(chunks)} chunks")
     
     if not intermediate_files:
         raise ValueError("No valid intermediate files created")
@@ -990,12 +1072,6 @@ def main():
                        help='Target sample rate for audio (default: 16000)')
     parser.add_argument('--text_encoding', type=str, default='utf-8',
                        help='Text file encoding (default: utf-8)')
-    parser.add_argument('--key_prefix', type=str, default='sample',
-                       help='Prefix for sample keys (default: sample)')
-    parser.add_argument('--audio_extensions', nargs='+', default=['.mp3', '.wav', '.flac'],
-                       help='Audio file extensions to search for')
-    parser.add_argument('--text_extensions', nargs='+', default=['.txt'],
-                       help='Text file extensions to search for')
     parser.add_argument('--log_level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Logging level (default: INFO)')
@@ -1015,12 +1091,12 @@ def main():
                        help='Resume processing from existing partial dataset')
     parser.add_argument('--diagnose_mp3', action='store_true',
                        help='Run detailed diagnostics on MP3 files')
-    parser.add_argument('--chunk_by_folders', action='store_true',
-                       help='Enable folder-by-folder processing for large datasets')
+    parser.add_argument('--chunk_by_files', action='store_true',
+                       help='Enable file-based chunked processing for large datasets')
     parser.add_argument('--intermediate_dir', type=str, default='temp_intermediates',
                        help='Directory for intermediate .arrow files (default: temp_intermediates)')
-    parser.add_argument('--folders_per_batch', type=int, default=1000,
-                       help='Process N folders before intermediate save (default: 1000)')
+    parser.add_argument('--files_per_chunk', type=int, default=10000,
+                       help='Process N file pairs per chunk (default: 10000)')
     parser.add_argument('--keep_intermediates', action='store_true',
                        help='Keep intermediate files after merging (for debugging)')
     
@@ -1031,8 +1107,8 @@ def main():
     
     try:
         # Check if using chunked processing
-        if args.chunk_by_folders:
-            logging.info(f"Using chunked folder-by-folder processing for {args.input_dir}")
+        if args.chunk_by_files:
+            logging.info(f"Using chunked file-based processing for {args.input_dir}")
             
             # Create dataset using chunked approach
             dataset = create_arrow_dataset_chunked(
@@ -1041,7 +1117,7 @@ def main():
                 args.target_sr,
                 args.text_encoding,
                 args.min_file_size,
-                args.folders_per_batch,
+                args.files_per_chunk,
                 args.max_workers
             )
             
@@ -1063,11 +1139,7 @@ def main():
         
         # Standard processing approach
         logging.info(f"Searching for audio-text pairs in {args.input_dir}")
-        pairs = find_audio_text_pairs(
-            args.input_dir, 
-            args.audio_extensions, 
-            args.text_extensions
-        )
+        pairs = find_audio_text_pairs(args.input_dir)
         
         
         # Run diagnostics if requested
