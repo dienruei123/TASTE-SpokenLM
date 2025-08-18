@@ -879,7 +879,7 @@ if __name__ == "__main__":
                         help='Number of sentences per chunk when using sentence-based chunking (default: 1)')
     parser.add_argument('--words-per-chunk', type=int, default=2,
                         help='Number of words per chunk when using word-based chunking (default: 2)')
-    parser.add_argument('--max-prev-chunks', type=int, default=None,
+    parser.add_argument('--max-prev-chunks', type=int, default=1,
                         help='Maximum number of previous chunks to keep in context (default: None for unlimited)')
     args = parser.parse_args()
     
