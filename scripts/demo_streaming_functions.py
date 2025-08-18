@@ -16,6 +16,219 @@ from pathlib import Path
 # Import the streaming functions and models
 from taste_speech import TasteForCausalLM, TasteProcessor
 from taste_speech.streaming import taste_tokenize, taste_detokenize
+import re
+from datetime import timedelta
+
+
+def parse_srt_file(srt_path):
+    """
+    Parse SRT subtitle file to extract word timing information.
+    
+    Args:
+        srt_path: Path to the SRT file
+        
+    Returns:
+        List of tuples: [(start_time_ms, end_time_ms, word), ...]
+    """
+    words_timing = []
+    
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        content = f.read().strip()
+    
+    # Split by double newlines to get subtitle blocks
+    blocks = re.split(r'\n\s*\n', content)
+    
+    for block in blocks:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3:
+            # Parse timing line (format: HH:MM:SS,mmm --> HH:MM:SS,mmm)
+            timing_line = lines[1]
+            if '-->' in timing_line:
+                start_str, end_str = timing_line.split(' --> ')
+                start_ms = srt_time_to_ms(start_str.strip())
+                end_ms = srt_time_to_ms(end_str.strip())
+                
+                # Get word text (join all remaining lines)
+                word = ' '.join(lines[2:]).strip()
+                words_timing.append((start_ms, end_ms, word))
+    
+    return words_timing
+
+
+def srt_time_to_ms(time_str):
+    """Convert SRT time format (HH:MM:SS,mmm) to milliseconds."""
+    time_str = time_str.replace(',', '.')  # Replace comma with dot for parsing
+    parts = time_str.split(':')
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds = float(parts[2])
+    
+    total_ms = (hours * 3600 + minutes * 60 + seconds) * 1000
+    return int(total_ms)
+
+
+def extract_audio_segment(audio_waveform, start_ms, end_ms, sampling_rate=16000):
+    """Extract audio segment from waveform based on time in milliseconds."""
+    start_sample = int(start_ms * sampling_rate / 1000)
+    end_sample = int(end_ms * sampling_rate / 1000)
+    
+    # Ensure we don't exceed audio boundaries
+    start_sample = max(0, start_sample)
+    end_sample = min(audio_waveform.shape[1], end_sample)
+    
+    if start_sample >= end_sample:
+        # Return empty tensor if invalid range
+        return audio_waveform[:, 0:0]
+    
+    return audio_waveform[:, start_sample:end_sample]
+
+
+def generate_asr_tokens_from_srt(words_timing, processor, device):
+    """
+    Generate ASR token IDs and word IDs from SRT file content using ASR tokenizer.
+    
+    Args:
+        words_timing: List of (start_ms, end_ms, word) from SRT file
+        processor: TasteProcessor containing audio_tokenizer
+        device: Device to put tensors on
+        
+    Returns:
+        Tuple of (asr_token_ids, asr_word_ids)
+    """
+    # Extract full text from SRT
+    full_text = " ".join([word for _, _, word in words_timing])
+    
+    # Tokenize using ASR tokenizer
+    tokenized = processor.audio_tokenizer(
+        full_text, 
+        return_tensors="pt", 
+        padding=True, 
+        truncation=True
+    )
+    
+    asr_token_ids = tokenized['input_ids'].to(device)
+    
+    # Generate word IDs based on token-to-word mapping
+    word_ids = []
+    current_word_idx = 0
+    
+    # For each token, determine which word it belongs to
+    decoded_tokens = processor.audio_tokenizer.convert_ids_to_tokens(asr_token_ids[0])
+    
+    for token_idx, token in enumerate(decoded_tokens):
+        if token_idx == 0:  # First token
+            word_ids.append(current_word_idx)
+        elif token.startswith('▁') or token.startswith(' ') or token.startswith('Ġ'):  # Word boundary markers
+            current_word_idx += 1
+            if current_word_idx >= len(words_timing):
+                current_word_idx = len(words_timing) - 1
+            word_ids.append(current_word_idx)
+        else:
+            word_ids.append(current_word_idx)
+    
+    # Ensure word_ids has same length as token_ids
+    while len(word_ids) < asr_token_ids.shape[1]:
+        word_ids.append(current_word_idx)
+    
+    asr_word_ids = torch.tensor([word_ids], dtype=torch.long, device=device)
+    
+    return asr_token_ids, asr_word_ids
+
+
+def create_streaming_chunks(asr_token_ids, asr_word_ids, words_timing, window_size_ms=8000, trigger_words=2):
+    """
+    Create streaming chunks based on sliding time window and word triggers.
+    
+    Args:
+        asr_token_ids: ASR token IDs tensor of shape (1, seq_len)
+        asr_word_ids: Word IDs tensor of shape (1, seq_len)
+        words_timing: List of (start_ms, end_ms, word) from SRT file
+        window_size_ms: Sliding window size in milliseconds
+        trigger_words: Number of words that trigger processing
+        
+    Returns:
+        List of processing chunks with timing and context information
+    """
+    chunks = []
+    processed_words = 0
+    
+    # Group words by trigger_words
+    for i in range(0, len(words_timing), trigger_words):
+        # Get current trigger words
+        current_words = words_timing[i:i + trigger_words]
+        if not current_words:
+            continue
+            
+        # Calculate time range for current words
+        current_start_ms = current_words[0][0]
+        current_end_ms = current_words[-1][1]
+        
+        # Calculate sliding window bounds
+        window_start_ms = max(0, current_end_ms - window_size_ms)
+        window_end_ms = current_end_ms
+        
+        # Find all words within the sliding window
+        context_words = []
+        for word_info in words_timing:
+            word_start, word_end, word_text = word_info
+            if word_end >= window_start_ms and word_start <= window_end_ms:
+                context_words.append(word_info)
+        
+        # Find word IDs that correspond to current processing chunk
+        current_word_indices = []
+        context_word_indices = []
+        
+        word_ids_flat = asr_word_ids.squeeze(0)
+        unique_word_ids = torch.unique(word_ids_flat, sorted=True)
+        
+        # Map current trigger words to word indices
+        for word_idx in range(i, min(i + trigger_words, len(words_timing))):
+            if word_idx < len(unique_word_ids):
+                current_word_indices.extend([unique_word_ids[word_idx].item()])
+        
+        # Map context words to word indices (all words in window)
+        window_word_start_idx = 0
+        window_word_end_idx = 0
+        for word_idx, (word_start, word_end, _) in enumerate(words_timing):
+            if word_end >= window_start_ms and word_start <= window_end_ms:
+                if window_word_start_idx == 0 or word_idx < window_word_start_idx:
+                    window_word_start_idx = word_idx
+                if word_idx >= window_word_end_idx:
+                    window_word_end_idx = word_idx + 1
+        
+        # Extract context word IDs
+        context_word_ids = unique_word_ids[window_word_start_idx:window_word_end_idx].tolist()
+        
+        # Find token positions for current processing words
+        current_token_mask = torch.isin(word_ids_flat, torch.tensor(current_word_indices, device=word_ids_flat.device))
+        current_token_indices = torch.where(current_token_mask)[0]
+        
+        # Find token positions for context (sliding window)
+        context_token_mask = torch.isin(word_ids_flat, torch.tensor(context_word_ids, device=word_ids_flat.device))
+        context_token_indices = torch.where(context_token_mask)[0]
+        
+        if len(current_token_indices) > 0 and len(context_token_indices) > 0:
+            # Current processing tokens
+            current_start_idx = current_token_indices[0].item()
+            current_end_idx = current_token_indices[-1].item() + 1
+            
+            # Context tokens (sliding window)
+            context_start_idx = context_token_indices[0].item()
+            context_end_idx = context_token_indices[-1].item() + 1
+            
+            chunks.append({
+                'current_token_range': (current_start_idx, current_end_idx),
+                'context_token_range': (context_start_idx, context_end_idx),
+                'current_time_range': (current_start_ms, current_end_ms),
+                'context_time_range': (window_start_ms, window_end_ms),
+                'words_info': current_words,
+                'context_words_info': context_words,
+                'processed_words_count': processed_words
+            })
+            
+        processed_words += len(current_words)
+    
+    return chunks
 
 
 def create_sentence_based_chunks(asr_token_ids, asr_word_ids, taste_tokens, processor, max_sentences_per_chunk=1):
@@ -171,17 +384,23 @@ def main(args=None):
     # Configuration
     model_id = 'MediaTek-Research/Llama-1B-TASTE-Speech-V0'
     audio_path = args.input
+    srt_path = args.srt
     output_path = 'demo_output.wav'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     sampling_rate = 16000
     
     print(f"Using device: {device}")
     print(f"Input audio: {audio_path}")
+    print(f"Input SRT: {srt_path}")
     print(f"Output audio: {output_path}")
     
-    # Check if input audio exists
+    # Check if input files exist
     if not os.path.exists(audio_path):
         print(f"Error: Input audio file {audio_path} not found!")
+        return
+    
+    if not os.path.exists(srt_path):
+        print(f"Error: Input SRT file {srt_path} not found!")
         return
     
     # Load model and processor
@@ -198,37 +417,25 @@ def main(args=None):
         print(f"Error loading model/processor: {e}")
         return
     
-    # Process the input audio to get text tokens and other information
-    print("\n2. Processing input audio...")
+    # Process the input audio to extract speaker embeddings and load audio waveform
+    print("\n2. Processing input audio for speaker embeddings...")
     try:
-        # Process audio to get all necessary information
+        # Process audio to get speaker embeddings only
         processed_data = processor(
             audio_path, 
             sampling_rate,
             ref_audio_list=[audio_path],
-            output_text_info=True
+            output_text_info=False  # We don't need ASR tokens here since we'll generate them from SRT
         )
         
-        # Extract necessary components
+        # Extract speaker embeddings
         speaker_embeds = processed_data['speaker_embeds']
         if isinstance(speaker_embeds, torch.Tensor):
             speaker_embeds = speaker_embeds.clone().detach().to(device)
         else:
             speaker_embeds = torch.from_numpy(speaker_embeds).to(device)
-            
-        asr_token_ids = processed_data['asr_token_ids']
-        if isinstance(asr_token_ids, torch.Tensor):
-            asr_token_ids = asr_token_ids.clone().detach().to(device)
-        else:
-            asr_token_ids = torch.from_numpy(asr_token_ids).to(device)
-            
-        asr_word_ids = processed_data['asr_word_ids']
-        if isinstance(asr_word_ids, torch.Tensor):
-            asr_word_ids = asr_word_ids.clone().detach().to(device)
-        else:
-            asr_word_ids = torch.from_numpy(asr_word_ids).to(device)
         
-        # Load the actual audio waveform
+        # Load the actual audio waveform separately
         audio_waveform, orig_sr = torchaudio.load(audio_path)
         # Average stereo to mono if needed
         if audio_waveform.shape[0] > 1:
@@ -240,30 +447,115 @@ def main(args=None):
         
         print(f"✓ Audio processed successfully")
         print(f"  - Speaker embeds shape: {speaker_embeds.shape}")
-        print(f"  - ASR token IDs shape: {asr_token_ids.shape}")
         print(f"  - Audio waveform shape: {audio_waveform.shape}")
-        print(f"  - Text: {processed_data.get('text', [''])[0]}")
+        print(f"  - Audio duration: {audio_waveform.shape[1] / sampling_rate:.2f} seconds")
         
     except Exception as e:
         print(f"Error processing audio: {e}")
         return
     
-    # Step 3: Tokenize audio to TASTE tokens
-    print("\n3. Converting audio to TASTE tokens...")
+    # Step 3: Streaming tokenization with sliding window
+    print("\n3. Streaming TASTE tokenization (8s sliding window, 2-word triggers)...")
     try:
-        taste_tokens = taste_tokenize(
-            model=model,
-            processor=processor,
-            audio=audio_waveform,
-            token_ids=asr_token_ids,
-            word_ids=asr_word_ids,
-            sampling_rate=sampling_rate
+        # Parse SRT file to get word timing information
+        print("  Parsing SRT file for word timing...")
+        words_timing = parse_srt_file(srt_path)
+        print(f"  - Found {len(words_timing)} word timings in SRT file")
+        
+        # Generate ASR tokens from SRT content using ASR tokenizer
+        print("  Generating ASR tokens from SRT content...")
+        asr_token_ids, asr_word_ids = generate_asr_tokens_from_srt(words_timing, processor, device)
+        print(f"  - Generated ASR token IDs shape: {asr_token_ids.shape}")
+        print(f"  - Generated ASR word IDs shape: {asr_word_ids.shape}")
+        print(f"  - Text content: {processor.audio_tokenizer.decode(asr_token_ids[0], skip_special_tokens=True)}")
+        
+        # Create streaming chunks (8s window, 2-word triggers)
+        streaming_chunks = create_streaming_chunks(
+            asr_token_ids, asr_word_ids, words_timing,
+            window_size_ms=8000, trigger_words=2
         )
-        print(f"✓ Audio tokenized successfully")
-        print(f"  - TASTE tokens shape: {taste_tokens.shape}")
+        print(f"  - Created {len(streaming_chunks)} streaming processing chunks")
+        
+        # Initialize aggregated results
+        all_taste_tokens = []
+        processed_ranges = []
+        
+        # Process each chunk with streaming approach
+        for chunk_idx, chunk_info in enumerate(streaming_chunks):
+            current_start, current_end = chunk_info['current_token_range']
+            context_start, context_end = chunk_info['context_token_range']
+            current_time_start, current_time_end = chunk_info['current_time_range']
+            
+            print(f"  Processing chunk {chunk_idx + 1}/{len(streaming_chunks)}")
+            print(f"    - Current words: {[w[2] for w in chunk_info['words_info']]}")
+            print(f"    - Time range: {current_time_start}ms - {current_time_end}ms")
+            print(f"    - Token range: {current_start} - {current_end}")
+            print(f"    - Context token range: {context_start} - {context_end}")
+            
+            # Extract context (sliding window) data for processing
+            context_asr_token_ids = asr_token_ids[:, context_start:context_end]
+            context_asr_word_ids = asr_word_ids[:, context_start:context_end]
+            context_audio = extract_audio_segment(
+                audio_waveform, 
+                chunk_info['context_time_range'][0], 
+                chunk_info['context_time_range'][1], 
+                sampling_rate
+            )
+            
+            print(f"    - Context audio shape: {context_audio.shape}")
+            print(f"    - Context tokens shape: {context_asr_token_ids.shape}")
+            
+            # Only process if we have valid audio and tokens
+            if context_audio.shape[1] > 0 and context_asr_token_ids.shape[1] > 0:
+                # Run taste_tokenize on the context window
+                context_taste_tokens = taste_tokenize(
+                    model=model,
+                    processor=processor,
+                    audio=context_audio,
+                    token_ids=context_asr_token_ids,
+                    word_ids=context_asr_word_ids,
+                    sampling_rate=sampling_rate
+                )
+                
+                # Extract only the newly processed portion (current words)
+                current_offset_in_context = current_start - context_start
+                current_length = current_end - current_start
+                
+                if current_offset_in_context >= 0 and current_offset_in_context + current_length <= context_taste_tokens.shape[1]:
+                    new_taste_tokens = context_taste_tokens[:, current_offset_in_context:current_offset_in_context + current_length, :]
+                    all_taste_tokens.append(new_taste_tokens)
+                    processed_ranges.append((current_start, current_end))
+                    
+                    print(f"    - Generated TASTE tokens shape: {new_taste_tokens.shape}")
+                    print(f"    - Tokens for range {current_start}-{current_end} processed and stored")
+                else:
+                    print(f"    - Warning: Invalid offset calculation, skipping this chunk")
+            else:
+                print(f"    - Warning: Empty audio or tokens, skipping this chunk")
+        
+        # Aggregate all processed TASTE tokens back into the original sequence
+        if all_taste_tokens:
+            # Initialize full taste_tokens tensor
+            full_seq_len = asr_token_ids.shape[1]
+            vq_dim = all_taste_tokens[0].shape[2]
+            taste_tokens = torch.zeros(1, full_seq_len, vq_dim, dtype=all_taste_tokens[0].dtype, device=device)
+            
+            # Fill in the processed portions
+            for i, (taste_chunk, (start_idx, end_idx)) in enumerate(zip(all_taste_tokens, processed_ranges)):
+                taste_tokens[:, start_idx:end_idx, :] = taste_chunk
+                print(f"  - Filled range {start_idx}-{end_idx} with chunk {i+1} results")
+            
+            print(f"✓ Streaming TASTE tokenization completed successfully")
+            print(f"  - Final aggregated TASTE tokens shape: {taste_tokens.shape}")
+            print(f"  - Processed {len(all_taste_tokens)} chunks with sliding window approach")
+        else:
+            print("Error: No TASTE tokens were generated from streaming processing")
+            return
         
     except Exception as e:
-        print(f"Error during tokenization: {e}")
+        print(f"Error during streaming tokenization: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Step 4: Convert TASTE tokens back to audio (with or without chunking)
@@ -575,8 +867,10 @@ def main(args=None):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='TASTE Streaming Functions Demo')
-    parser.add_argument('--input', type=str, default='examples/orig/hifi-tts-dev-clean-speaker6097/012.wav',
-                        help='Input audio file path (default: examples/orig/speaker_ref.wav)')
+    parser.add_argument('--input', type=str, default='tests/streaming/samples/sample_01.wav',
+                        help='Input audio file path (default: tests/streaming/samples/sample_01.wav)')
+    parser.add_argument('--srt', type=str, default='tests/streaming/samples/sample_01.srt',
+                        help='SRT subtitle file path (default: tests/streaming/samples/sample_01.srt)')
     parser.add_argument('--no-chunk', action='store_true', 
                         help='Disable chunking in step 4 (process all tokens at once)')
     parser.add_argument('--chunk-mode', choices=['sentence', 'word'], default='sentence',
