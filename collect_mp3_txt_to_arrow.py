@@ -523,8 +523,14 @@ def process_chunk(chunk_pairs: List[Tuple[str, str]], chunk_name: str, intermedi
         intermediate_dataset = Dataset.from_list(samples)
         intermediate_dataset.save_to_disk(str(intermediate_file))
         
+        # Verify the file was created successfully
+        if not Path(intermediate_file).exists():
+            logging.error(f"Failed to create intermediate file: {intermediate_file}")
+            return None
+        
         success_rate = len(samples) / len(chunk_pairs) * 100
         print(f"✅ Completed chunk: {chunk_name} - {len(samples)}/{len(chunk_pairs)} samples processed ({success_rate:.1f}% success, {failed_count} failed)")
+        logging.info(f"Saved intermediate dataset to: {intermediate_file}")
         
         # Clear memory
         del samples, intermediate_dataset
@@ -782,16 +788,34 @@ def merge_intermediate_files(intermediate_files: List[str], final_output: str) -
     if not intermediate_files:
         raise ValueError("No intermediate files to merge")
     
+    # Debug: List all intermediate files and their status
+    logging.info("Checking intermediate files:")
+    for file_path in intermediate_files:
+        exists = Path(file_path).exists()
+        is_dir = Path(file_path).is_dir() if exists else False
+        logging.info(f"  {file_path}: exists={exists}, is_dir={is_dir}")
+        if exists and is_dir:
+            try:
+                contents = list(Path(file_path).iterdir())
+                logging.info(f"    Contents: {[f.name for f in contents[:5]]}")  # Show first 5 items
+            except Exception as e:
+                logging.warning(f"    Could not list contents: {e}")
+    
     # Load datasets one by one to avoid memory overflow
     datasets = []
     total_samples = 0
+    successful_loads = 0
+    failed_loads = 0
     
     for i, file_path in enumerate(tqdm(intermediate_files, desc="Loading intermediate files")):
         try:
             if Path(file_path).exists():
+                logging.debug(f"Loading dataset from {file_path}")
                 dataset = Dataset.load_from_disk(file_path)
                 datasets.append(dataset)
                 total_samples += len(dataset)
+                successful_loads += 1
+                logging.debug(f"Successfully loaded {len(dataset)} samples from {file_path}")
                 
                 # Memory management - merge in batches to avoid overflow
                 if len(datasets) >= 100:  # Merge every 100 datasets
@@ -802,11 +826,19 @@ def merge_intermediate_files(intermediate_files: List[str], final_output: str) -
                     
             else:
                 logging.warning(f"Intermediate file not found: {file_path}")
+                failed_loads += 1
         except Exception as e:
             logging.error(f"Failed to load intermediate file {file_path}: {e}")
+            failed_loads += 1
             continue
     
+    logging.info(f"Load summary: {successful_loads} successful, {failed_loads} failed")
+    
     if not datasets:
+        logging.error("No datasets were successfully loaded!")
+        logging.error(f"Tried to load {len(intermediate_files)} intermediate files")
+        for file_path in intermediate_files[:3]:  # Show first 3 for debugging
+            logging.error(f"  Example file: {file_path} (exists: {Path(file_path).exists()})")
         raise ValueError("No valid intermediate datasets loaded")
     
     # Final merge
@@ -889,6 +921,12 @@ def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_s
     logging.info(f"Successfully processed {len(intermediate_files)}/{len(chunks)} chunks")
     
     if not intermediate_files:
+        logging.error(f"No intermediate files were created from {len(chunks)} chunks!")
+        logging.error("This could be due to:")
+        logging.error("  1. All audio/text files failed validation")
+        logging.error("  2. Corrupted files in the dataset")  
+        logging.error("  3. Permission issues writing to intermediate directory")
+        logging.error(f"  4. Issues with target directory: {intermediate_dir}")
         raise ValueError("No valid intermediate files created")
     
     # Merge all intermediate files
