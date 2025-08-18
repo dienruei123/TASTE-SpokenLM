@@ -1178,7 +1178,7 @@ def main():
     parser.add_argument('--files_per_chunk', type=int, default=10000,
                        help='Process N file pairs per chunk (default: 10000)')
     parser.add_argument('--keep_intermediates', action='store_true',
-                       help='Keep intermediate files after merging (for debugging)')
+                       help='Keep intermediate files after merging (for debugging, default: delete)')
     
     args = parser.parse_args()
     
@@ -1209,7 +1209,18 @@ def main():
             # Cleanup intermediate files unless requested to keep
             if not args.keep_intermediates:
                 logging.info("Cleaning up intermediate files...")
-                cleanup_intermediate_files(intermediate_files, args.intermediate_dir)
+                try:
+                    cleanup_intermediate_files(intermediate_files, args.intermediate_dir)
+                except Exception as cleanup_error:
+                    logging.warning(f"Cleanup encountered an issue: {cleanup_error}")
+                    # Try simple directory removal as fallback
+                    try:
+                        import shutil
+                        if Path(args.intermediate_dir).exists():
+                            shutil.rmtree(args.intermediate_dir)
+                            logging.info("Fallback cleanup successful")
+                    except Exception as fallback_error:
+                        logging.warning(f"Fallback cleanup also failed: {fallback_error}")
             
             logging.info(f"Successfully created chunked dataset with {len(dataset)} samples")
             logging.info(f"Final output saved to: {args.output_file}")
