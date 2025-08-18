@@ -724,6 +724,48 @@ def process_sample_batch(batch_data: Tuple[List[Tuple[str, str]], int, int, int,
     return samples
 
 
+def cleanup_intermediate_files(intermediate_files: List[str], intermediate_dir: str) -> None:
+    """
+    Safely cleanup intermediate files and directory.
+    
+    Args:
+        intermediate_files: List of intermediate file paths to remove
+        intermediate_dir: Intermediate directory to remove
+    """
+    import shutil
+    
+    # Remove individual intermediate datasets first
+    for intermediate_file in intermediate_files:
+        try:
+            if Path(intermediate_file).exists():
+                if Path(intermediate_file).is_dir():
+                    shutil.rmtree(intermediate_file)
+                else:
+                    Path(intermediate_file).unlink()
+                logging.debug(f"Removed intermediate file: {intermediate_file}")
+        except OSError as e:
+            logging.warning(f"Could not remove intermediate file {intermediate_file}: {e}")
+    
+    # Try to remove the intermediate directory
+    try:
+        if Path(intermediate_dir).exists():
+            # Remove any remaining files in the directory
+            for item in Path(intermediate_dir).rglob('*'):
+                try:
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        item.rmdir()
+                except OSError:
+                    pass
+            
+            # Finally remove the directory itself
+            Path(intermediate_dir).rmdir()
+            logging.info(f"Successfully cleaned up intermediate directory: {intermediate_dir}")
+    except OSError as e:
+        logging.warning(f"Could not remove intermediate directory {intermediate_dir}: {e}")
+
+
 def merge_intermediate_files(intermediate_files: List[str], final_output: str) -> Dataset:
     """
     Merge intermediate .arrow files into final dataset using streaming approach.
@@ -782,7 +824,7 @@ def merge_intermediate_files(intermediate_files: List[str], final_output: str) -
 
 def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_sr: int = 16000,
                                 text_encoding: str = 'utf-8', min_file_size: int = 1024,
-                                files_per_chunk: int = 10000, max_workers: int = None) -> Dataset:
+                                files_per_chunk: int = 10000, max_workers: int = None) -> Tuple[Dataset, List[str]]:
     """
     Create dataset using file-based chunked processing for large datasets.
     
@@ -796,7 +838,7 @@ def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_s
         max_workers: Number of parallel workers
         
     Returns:
-        Final dataset
+        Tuple of (final dataset, list of intermediate file paths)
     """
     # First, find all audio-text pairs in the directory
     logging.info(f"Finding audio-text pairs in {input_dir}")
@@ -852,7 +894,7 @@ def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_s
     # Merge all intermediate files
     final_dataset = merge_intermediate_files(intermediate_files, "final_output")
     
-    return final_dataset
+    return final_dataset, intermediate_files
 
 
 def create_arrow_dataset_batch(pairs: List[Tuple[str, str]], target_sr: int = 16000, 
@@ -1111,7 +1153,7 @@ def main():
             logging.info(f"Using chunked file-based processing for {args.input_dir}")
             
             # Create dataset using chunked approach
-            dataset = create_arrow_dataset_chunked(
+            dataset, intermediate_files = create_arrow_dataset_chunked(
                 args.input_dir,
                 args.intermediate_dir,
                 args.target_sr,
@@ -1129,9 +1171,7 @@ def main():
             # Cleanup intermediate files unless requested to keep
             if not args.keep_intermediates:
                 logging.info("Cleaning up intermediate files...")
-                import shutil
-                if Path(args.intermediate_dir).exists():
-                    shutil.rmtree(args.intermediate_dir)
+                cleanup_intermediate_files(intermediate_files, args.intermediate_dir)
             
             logging.info(f"Successfully created chunked dataset with {len(dataset)} samples")
             logging.info(f"Final output saved to: {args.output_file}")
