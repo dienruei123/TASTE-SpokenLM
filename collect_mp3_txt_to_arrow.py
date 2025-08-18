@@ -485,7 +485,13 @@ def process_chunk(chunk_pairs: List[Tuple[str, str]], chunk_name: str, intermedi
         Path to created intermediate file, or None if no valid samples
     """
     intermediate_path = Path(intermediate_dir)
-    intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    # Ensure intermediate directory exists and is writable
+    if not intermediate_path.exists():
+        intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    if not intermediate_path.is_dir():
+        raise ValueError(f"Intermediate path is not a directory: {intermediate_dir}")
     
     # Generate intermediate file name
     intermediate_file = intermediate_path / f"intermediate_{chunk_name}.arrow"
@@ -882,9 +888,31 @@ def create_arrow_dataset_chunked(input_dir: str, intermediate_dir: str, target_s
     logging.info(f"Found {len(pairs)} audio-text pairs")
     logging.info(f"Processing in chunks of {files_per_chunk} files")
     
-    # Create intermediate directory
+    # Create intermediate directory (clean up empty existing one first)
     intermediate_path = Path(intermediate_dir)
+    
+    # Check if directory exists and clean it up if empty or problematic
+    if intermediate_path.exists():
+        try:
+            # Check if directory is empty or contains only empty subdirectories
+            contents = list(intermediate_path.rglob('*'))
+            if not contents or all(not item.is_file() for item in contents):
+                logging.info(f"Removing empty intermediate directory: {intermediate_dir}")
+                import shutil
+                shutil.rmtree(intermediate_path)
+            else:
+                logging.info(f"Intermediate directory exists with {len(contents)} items, keeping existing content")
+        except Exception as e:
+            logging.warning(f"Could not check intermediate directory contents: {e}")
+    
+    # Create the directory
     intermediate_path.mkdir(parents=True, exist_ok=True)
+    
+    # Verify directory was created successfully
+    if not intermediate_path.exists() or not intermediate_path.is_dir():
+        raise ValueError(f"Failed to create intermediate directory: {intermediate_dir}")
+    
+    logging.info(f"Intermediate directory ready: {intermediate_dir}")
     
     # Split pairs into chunks
     chunks = []
