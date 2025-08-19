@@ -92,7 +92,7 @@ class WeightedSum(nn.Module):
     def __init__(
         self,
         ignore_id: int = IGNORE_ID,
-        normalize: bool = True,
+        normalize: bool = False,
         use_trainable_weight: bool = True,
         use_layer_norm: bool = False,
         weight_init_type: str = 'balance'
