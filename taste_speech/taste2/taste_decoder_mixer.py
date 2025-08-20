@@ -12,14 +12,13 @@ class TasteDecoderMixer(nn.Module):
         class_name='weighted_sum',
     ):
         super().__init__()
-        self.mixer = TTS_INPUT_FUSION_CLASSES[class_name]
+        self.mixer = TTS_INPUT_FUSION_CLASSES[class_name]()
 
     def forward(
         self,
-        audio_token_encoded,
-        audio_token_len,
-        text_token_encoded,
-        text_token_len,
+        text_token_emb, 
+        taste_token_emb, 
+        text_token_len
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -29,8 +28,8 @@ class TasteDecoderMixer(nn.Module):
             audio_token_len: (B,)
         """
         return self.mixer(
-            audio_token_encoded,
-            audio_token_len,
-            text_token_encoded,
+            taste_token_emb,
             text_token_len,
-        )
+            text_token_emb,
+            text_token_len,
+        )[0]
