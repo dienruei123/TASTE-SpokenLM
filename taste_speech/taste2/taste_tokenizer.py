@@ -38,15 +38,12 @@ class TasteTokenizer(nn.Module):
 
         self.audio_affine_layer = nn.Linear(whisper_decoder_embed_dim, encoder_input_size)
 
-        if kwargs_for_quantizer != None:
+        if self.quantization_on:
             replaced_kwargs = dict(kwargs_for_quantizer)
             quantizer_class = replaced_kwargs.pop('quantizer_class', 'rvq')
             self.vq = QUANTIZER_CLASSES[quantizer_class](
                 **replaced_kwargs,
             )
-            self.quantization_on = True
-        else:
-            self.quantization_on = False
 
     def load_from_cosyvoice_ckpt(self, pt_path):
         raise NotImplementedError
